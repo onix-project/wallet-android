@@ -100,7 +100,7 @@ public class Constants {
         COINS_BLOCK_EXPLORERS = new HashMap<CoinType, String>();
         COINS_BLOCK_EXPLORERS.put(CoinID.BITCOIN_MAIN.getCoinType(), "https://blockchain.info/tx/%s");
         COINS_BLOCK_EXPLORERS.put(CoinID.LITECOIN_MAIN.getCoinType(), "http://ltc.blockr.io/tx/info/%s");
-        //COINS_BLOCK_EXPLORERS.put(CoinID.NEWCOIN_MAIN.getCoinType(), "https://127.0.0.1");
+        COINS_BLOCK_EXPLORERS.put(CoinID.NEWCOIN_MAIN.getCoinType(), "https://explorer.onixcoin.com/tx/%s");
     }
 
     public static final CoinType DEFAULT_COIN = BitcoinMain.get();
