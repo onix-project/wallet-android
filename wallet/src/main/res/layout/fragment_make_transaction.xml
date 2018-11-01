@@ -54,10 +54,9 @@
 
             <TextView
                 android:id="@+id/enter_password_label"
-                android:layout_width="match_parent"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="@string/enter_password"
-                android:gravity="center"
                 android:textAppearance="?android:attr/textAppearanceMedium" />
 
             <EditText

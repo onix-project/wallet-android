@@ -1,10 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android">
-<!--
+
     <Preference android:title="@string/pref_title_exchange_rates" >
         <intent android:targetPackage="@string/app_package"
-            android:targetClass="onixllet.ui.ExchangeRatesActivity" />
-    </Preference>    -->
+            android:targetClass="com.onix.wallet.ui.ExchangeRatesActivity" />
+    </Preference>
+
+    <Preference android:title="@string/title_activity_transaction_fees" >
+        <intent android:targetPackage="@string/app_package"
+            android:targetClass="com.onix.wallet.ui.FeesSettingsActivity" />
+    </Preference>
 
     <Preference android:title="@string/title_activity_show_seed" >
         <intent android:targetPackage="@string/app_package"
@@ -21,4 +26,10 @@
         android:title="@string/pref_title_manual_receiving_addresses"
         android:summary="@string/pref_summary_manual_receiving_addresses"
         android:defaultValue="false"/>
+    <!--
+    <Preference android:title="@string/title_activity_debugging" >
+        <intent android:targetPackage="@string/app_package"
+            android:targetClass="com.onix.wallet.ui.DebuggingActivity" />
+    </Preference>
+    -->
 </PreferenceScreen>
