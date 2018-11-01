@@ -21,14 +21,18 @@ package com.onix.core.uri;
 import com.onix.core.coins.CoinID;
 import com.onix.core.coins.CoinType;
 import com.onix.core.coins.Value;
+import com.onix.core.coins.families.NxtFamily;
+import com.onix.core.exceptions.AddressMalformedException;
 import com.onix.core.util.GenericUtils;
+import com.onix.core.wallet.AbstractAddress;
+import com.onix.core.wallet.families.bitcoin.BitAddress;
+import com.onix.core.wallet.families.nxt.NxtAddress;
 import com.google.common.collect.Lists;
 
-import org.bitcoinj.core.Address;
-import org.bitcoinj.core.AddressFormatException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.Serializable;
 import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -80,9 +84,10 @@ import static com.onix.core.Preconditions.checkState;
  * @author Andreas Schildbach (initial code)
  * @author Jim Burton (enhancements for MultiBit)
  * @author Gary Rowe (BIP21 support)
+ * @author John L. Jegutanis
  * @see <a href="https://github.com/bitcoin/bips/blob/master/bip-0021.mediawiki">BIP 0021</a>
  */
-public class CoinURI {
+public class CoinURI implements Serializable {
     /**
      * Provides logging for this class
      */
@@ -96,6 +101,7 @@ public class CoinURI {
     public static final String FIELD_PAYMENT_REQUEST_URL = "r";
     public static final String FIELD_ADDRESS_REQUEST_URI = "req-addressrequest";
     public static final String FIELD_NETWORK = "req-network";
+    public static final String FIELD_PUBKEY = "pubkey";
 
     private static final String ENCODED_SPACE_CHARACTER = "%20";
     private static final String AMPERSAND_SEPARATOR = "&";
@@ -168,9 +174,10 @@ public class CoinURI {
             possibleTypes = Lists.newArrayList(type);
         }
 
-        if (input.startsWith(uriScheme + "://")) {
+        String inputLowercase = input.toLowerCase();
+        if (inputLowercase.startsWith(uriScheme + "://")) {
             schemeSpecificPart = input.substring((uriScheme + "://").length());
-        } else if (input.startsWith(uriScheme + ":")) {
+        } else if (inputLowercase.startsWith(uriScheme + ":")) {
             schemeSpecificPart = input.substring((uriScheme + ":").length());
         } else {
             throw new CoinURIParseException("Unsupported URI scheme: " + uri.getScheme());
@@ -198,14 +205,20 @@ public class CoinURI {
         // Parse the address if any and set type
         if (!addressToken.isEmpty()) {
             // Attempt to parse the addressToken as a possible type address
-            Address address = null;
+            AbstractAddress address = null;
             for (CoinType possibleType : possibleTypes) {
-                try {
-                    address = new Address(possibleType, addressToken);
-                    putWithValidation(FIELD_ADDRESS, address);
-                    break;
-                } catch (final AddressFormatException e) {
-                    /* continue */
+                if (possibleType instanceof NxtFamily) {
+                    try {
+                        address = new NxtAddress(possibleType, addressToken);
+                        putWithValidation(FIELD_ADDRESS, address);
+                        break;
+                    } catch (RuntimeException e) {  /* continue */ }
+                } else {
+                    try {
+                        address = BitAddress.from(possibleType, addressToken);
+                        putWithValidation(FIELD_ADDRESS, address);
+                        break;
+                    } catch (final AddressMalformedException e) { /* continue */ }
                 }
             }
 
@@ -214,9 +227,9 @@ public class CoinURI {
             }
 
             if (type == null){
-                type = (CoinType) address.getParameters();
+                type = address.getType();
             } else {
-                checkState(type.equals(address.getParameters()));
+                checkState(type.equals(address.getType()));
             }
         }
 
@@ -397,8 +410,8 @@ public class CoinURI {
      * it.
      */
     @Nullable
-    public Address getAddress() {
-        return (Address) parameterMap.get(FIELD_ADDRESS);
+    public AbstractAddress getAddress() {
+        return (AbstractAddress) parameterMap.get(FIELD_ADDRESS);
     }
 
     /**
@@ -423,6 +436,14 @@ public class CoinURI {
         return (String) parameterMap.get(FIELD_MESSAGE);
     }
 
+
+    /**
+     * @return The public key.
+     */
+    public String getPublicKey() {
+        return (String) parameterMap.get(FIELD_PUBKEY);
+    }
+
     /**
      * @return The URL where a payment request (as specified in BIP 70) may
      *         be fetched.
@@ -439,7 +460,7 @@ public class CoinURI {
         return parameterMap.containsKey(FIELD_ADDRESS_REQUEST_URI);
     }
 
-    public URI getAddressRequestUriResponse(Address address) {
+    public URI getAddressRequestUriResponse(AbstractAddress address) {
         return getAddressRequestUriResponse(address.toString());
     }
 
@@ -487,16 +508,44 @@ public class CoinURI {
      * Simple coin URI builder using known good fields.
      *
      * @param address The coin address
+     * @return A String containing the coin URI
+     */
+    public static String convertToCoinURI(AbstractAddress address) {
+        return convertToCoinURI(address, null, null, null, null);
+
+    }
+
+    /**
+     * Simple coin URI builder using known good fields.
+     *
+     * @param address The coin address
      * @param amount The amount
      * @param label A label
      * @param message A message
      * @return A String containing the coin URI
      */
-    public static String convertToCoinURI(Address address, @Nullable Value amount,
+    public static String convertToCoinURI(AbstractAddress address, @Nullable Value amount,
                                           @Nullable String label, @Nullable String message) {
+        return convertToCoinURI(address, amount, label, message, null);
+
+    }
+
+    /**
+     * Simple coin URI builder using known good fields.
+     *
+     * @param address The coin address
+     * @param amount The amount
+     * @param label A label
+     * @param message A message
+     * @param pubkey A public key
+     * @return A String containing the coin URI
+     */
+    public static String convertToCoinURI(AbstractAddress address, @Nullable Value amount,
+                                          @Nullable String label, @Nullable String message,
+                                          @Nullable String pubkey) {
         checkNotNull(address);
 
-        CoinType type = (CoinType) address.getParameters();
+        CoinType type = address.getType();
         String addressStr = address.toString();
 
         if (amount != null && amount.signum() < 0) {
@@ -531,6 +580,15 @@ public class CoinURI {
                 builder.append(QUESTION_MARK_SEPARATOR);
             }
             builder.append(FIELD_MESSAGE).append("=").append(encodeURLString(message));
+        }
+
+        if (pubkey != null && !"".equals(pubkey)) {
+            if (questionMarkHasBeenOutput) {
+                builder.append(AMPERSAND_SEPARATOR);
+            } else {
+                builder.append(QUESTION_MARK_SEPARATOR);
+            }
+            builder.append(FIELD_PUBKEY).append("=").append(encodeURLString(pubkey));
         }
         
         return builder.toString();
