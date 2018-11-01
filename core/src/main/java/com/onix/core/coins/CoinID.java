@@ -1,9 +1,9 @@
 package com.onix.core.coins;
 
+import com.onix.core.exceptions.AddressMalformedException;
 import com.onix.core.util.GenericUtils;
 import com.google.common.collect.ImmutableList;
 
-import org.bitcoinj.core.AddressFormatException;
 import org.bitcoinj.core.NetworkParameters;
 import org.bitcoinj.params.Networks;
 
@@ -24,7 +24,7 @@ import java.util.Set;
 public enum CoinID {
     BITCOIN_MAIN(BitcoinMain.get()),
     LITECOIN_MAIN(LitecoinMain.get()),
-	NEWCOIN_MAIN(NewCoinMain.get()),
+    ONIXCOIN_MAIN(OnixcoinMain.get()),
     ;
 
     private static List<CoinType> types;
@@ -97,8 +97,9 @@ public enum CoinID {
     }
 
     public static List<CoinType> fromUri(String input) {
+        String inputLowercase = input.toLowerCase();
         for (String uri : uriLookup.keySet()) {
-            if (input.startsWith(uri + "://") || input.startsWith(uri + ":")) {
+            if (inputLowercase.startsWith(uri + "://") || inputLowercase.startsWith(uri + ":")) {
                 return uriLookup.get(uri);
             }
         }
@@ -106,14 +107,15 @@ public enum CoinID {
     }
 
     public static List<CoinType> fromUriScheme(String scheme) {
-        if (uriLookup.containsKey(scheme)) {
-            return uriLookup.get(scheme);
+        String schemeLowercase = scheme.toLowerCase();
+        if (uriLookup.containsKey(schemeLowercase)) {
+            return uriLookup.get(schemeLowercase);
         } else {
             throw new IllegalArgumentException("Unsupported URI scheme: " + scheme);
         }
     }
 
-    public static List<CoinType> typesFromAddress(String address) throws AddressFormatException {
+    public static List<CoinType> typesFromAddress(String address) throws AddressMalformedException {
         return GenericUtils.getPossibleTypes(address);
     }
 

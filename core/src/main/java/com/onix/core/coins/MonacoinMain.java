@@ -5,7 +5,7 @@ import com.onix.core.coins.families.BitFamily;
 /**
  * @author John L. Jegutanis
  */
-public class MonacoinMain extends CoinType {
+public class MonacoinMain extends BitFamily {
     private MonacoinMain() {
         id = "monacoin.main";
 
@@ -13,14 +13,14 @@ public class MonacoinMain extends CoinType {
         p2shHeader = 5;
         acceptableAddressCodes = new int[] { addressHeader, p2shHeader };
         spendableCoinbaseDepth = 100;
+        dumpedPrivateKeyHeader = 178;
 
-        family = BitFamily.get();
         name = "Monacoin";
         symbol = "MONA";
         uriScheme = "monacoin";
         bip44Index = 22;
         unitExponent = 8;
-        feePerKb = value(100000);
+        feeValue = value(100000);
         minNonDust = value(1000); // 0.00001 MNC mininput
         softDustLimit = value(100000); // 0.001 MONA
         softDustPolicy = SoftDustPolicy.BASE_FEE_FOR_EACH_SOFT_DUST_TXO;
@@ -28,7 +28,7 @@ public class MonacoinMain extends CoinType {
     }
 
     private static MonacoinMain instance = new MonacoinMain();
-    public static synchronized MonacoinMain get() {
+    public static synchronized CoinType get() {
         return instance;
     }
 }

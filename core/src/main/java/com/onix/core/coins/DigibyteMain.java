@@ -5,7 +5,7 @@ import com.onix.core.coins.families.BitFamily;
 /**
  * @author Digibyte
  */
-public class DigibyteMain extends CoinType {
+public class DigibyteMain extends BitFamily {
     private DigibyteMain() {
         id = "digibyte.main";
 
@@ -15,21 +15,20 @@ public class DigibyteMain extends CoinType {
         spendableCoinbaseDepth = 100;
         dumpedPrivateKeyHeader = 128;
 
-        family = BitFamily.get();
         name = "Digibyte (beta)";
         symbol = "DGB";
         uriScheme = "digibyte";
         bip44Index = 20;
         unitExponent = 8;
-        feePerKb = value(10000);
-        minNonDust = value(5460);
-        softDustLimit = value(100000);
-        softDustPolicy = SoftDustPolicy.BASE_FEE_FOR_EACH_SOFT_DUST_TXO;
+        feeValue = value(100000000);
+        minNonDust = value(54600000);
+        softDustLimit = value(1000000);
+        softDustPolicy = SoftDustPolicy.AT_LEAST_BASE_FEE_IF_SOFT_DUST_TXO_PRESENT;
         signedMessageHeader = toBytes("DigiByte Signed Message:\n");
     }
 
     private static DigibyteMain instance = new DigibyteMain();
-    public static synchronized DigibyteMain get() {
+    public static synchronized CoinType get() {
         return instance;
     }
 }

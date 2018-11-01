@@ -5,7 +5,7 @@ import com.onix.core.coins.families.ReddFamily;
 /**
  * @author FuzzyHobbit
  */
-public class CannacoinMain extends CoinType {
+public class CannacoinMain extends ReddFamily {
     private CannacoinMain() {
         id = "cannacoin.main";
 
@@ -16,13 +16,12 @@ public class CannacoinMain extends CoinType {
         dumpedPrivateKeyHeader = 189;
         transactionVersion = 2;
 
-        family = ReddFamily.get();
         name = "Cannacoin";
         symbol = "CCN";
         uriScheme = "cannacoin";
         bip44Index = 19;
         unitExponent = 8;
-        feePerKb = value(100000);
+        feeValue = value(100000);
         minNonDust = value(1000000);
         softDustLimit = value(100000000);
         softDustPolicy = SoftDustPolicy.BASE_FEE_FOR_EACH_SOFT_DUST_TXO;
@@ -30,7 +29,7 @@ public class CannacoinMain extends CoinType {
     }
 
     private static CannacoinMain instance = new CannacoinMain();
-    public static synchronized CannacoinMain get() {
+    public static synchronized CoinType get() {
         return instance;
     }
 }

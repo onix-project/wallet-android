@@ -2,7 +2,10 @@ package com.onix.core.coins;
 
 import com.onix.core.coins.families.PeerFamily;
 
-public class NovacoinMain extends CoinType {
+/**
+ * @author John L. Jegutanis
+ */
+public class NovacoinMain extends PeerFamily {
     private NovacoinMain() {
         id = "novacoin.main";
 
@@ -10,14 +13,14 @@ public class NovacoinMain extends CoinType {
         p2shHeader = 20;
         acceptableAddressCodes = new int[] { addressHeader, p2shHeader };
         spendableCoinbaseDepth = 520;
+        dumpedPrivateKeyHeader = 136;
 
-        family = PeerFamily.get();
-        name = "Novacoin (beta)";
+        name = "Novacoin";
         symbol = "NVC";
         uriScheme = "novacoin";
         bip44Index = 50;
         unitExponent = 6;
-        feePerKb = value(1000); // 0.001 NVC
+        feeValue = value(1000); // 0.001 NVC
         minNonDust = value(1);
         softDustLimit = value(10000); // 0.01 NVC
         softDustPolicy = SoftDustPolicy.BASE_FEE_FOR_EACH_SOFT_DUST_TXO;

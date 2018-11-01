@@ -1,23 +1,21 @@
 package com.onix.core.coins.families;
 
+import com.onix.core.coins.CoinType;
+import com.onix.core.exceptions.AddressMalformedException;
+import com.onix.core.wallet.families.bitcoin.BitAddress;
+
 /**
  * @author John L. Jegutanis
  *
  * This is the classical Bitcoin family that includes Litecoin, Dogecoin, Dash, etc
  */
-final public class BitFamily implements CoinFamily {
-    private final static CoinFamily instance = new BitFamily();
-    public static synchronized CoinFamily get() {
-        return instance;
+public abstract class BitFamily extends CoinType {
+    {
+        family = Families.BITCOIN;
     }
 
     @Override
-    public String toString() {
-        return "bitcoin";
-    }
-
-    @Override
-    public boolean equals(Object obj) {
-        return obj != null && obj instanceof BitFamily && toString().equals(obj.toString());
+    public BitAddress newAddress(String addressStr) throws AddressMalformedException {
+        return BitAddress.from(this, addressStr);
     }
 }

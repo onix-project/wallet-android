@@ -5,7 +5,7 @@ import com.onix.core.coins.families.BitFamily;
 /**
  * @author John L. Jegutanis
  */
-public class PrimecoinMain extends CoinType {
+public class PrimecoinMain extends BitFamily {
     private PrimecoinMain() {
         id = "primecoin.main";
 
@@ -13,14 +13,14 @@ public class PrimecoinMain extends CoinType {
         p2shHeader = 83;
         acceptableAddressCodes = new int[] { addressHeader, p2shHeader };
         spendableCoinbaseDepth = 3000;
+        dumpedPrivateKeyHeader = 151;
 
-        family = BitFamily.get();
         name = "Primecoin";
         symbol = "XPM";
         uriScheme = "primecoin";
         bip44Index = 24;
         unitExponent = 8;
-        feePerKb = value(1000000);
+        feeValue = value(1000000);
         minNonDust = value(546000);
         softDustLimit = value(1000000); // 0.01 XPM
         softDustPolicy = SoftDustPolicy.AT_LEAST_BASE_FEE_IF_SOFT_DUST_TXO_PRESENT;
@@ -28,7 +28,7 @@ public class PrimecoinMain extends CoinType {
     }
 
     private static PrimecoinMain instance = new PrimecoinMain();
-    public static synchronized PrimecoinMain get() {
+    public static synchronized CoinType get() {
         return instance;
     }
 }

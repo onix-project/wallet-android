@@ -5,7 +5,7 @@ import com.onix.core.coins.families.PeerFamily;
 /**
  * @author John L. Jegutanis
  */
-public class ParkbyteMain extends CoinType {
+public class ParkbyteMain extends PeerFamily {
     private ParkbyteMain() {
         id = "parkbyte.main";
 
@@ -13,14 +13,14 @@ public class ParkbyteMain extends CoinType {
         p2shHeader = 28;
         acceptableAddressCodes = new int[] { addressHeader, p2shHeader };
         spendableCoinbaseDepth = 5;
+        dumpedPrivateKeyHeader = 183;
 
-        family = PeerFamily.get();
         name = "ParkByte";
         symbol = "PKB";
         uriScheme = "parkbyte";
         bip44Index = 36;
         unitExponent = 8;
-        feePerKb = value(1000); // 0.0001PKB
+        feeValue = value(1000); // 0.0001PKB
         minNonDust = value(1000); // 0.01PKB
         softDustLimit = minNonDust;
         softDustPolicy = SoftDustPolicy.NO_POLICY;

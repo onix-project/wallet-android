@@ -5,7 +5,7 @@ import com.onix.core.coins.families.PeerFamily;
 /**
  * @author John L. Jegutanis
  */
-public class BlackcoinMain extends CoinType {
+public class BlackcoinMain extends PeerFamily {
     private BlackcoinMain() {
         id = "blackcoin.main";
 
@@ -13,14 +13,14 @@ public class BlackcoinMain extends CoinType {
         p2shHeader = 85;
         acceptableAddressCodes = new int[] { addressHeader, p2shHeader };
         spendableCoinbaseDepth = 500;
+        dumpedPrivateKeyHeader = 153;
 
-        family = PeerFamily.get();
         name = "Blackcoin";
         symbol = "BLK";
         uriScheme = "blackcoin";
         bip44Index = 10;
         unitExponent = 8;
-        feePerKb = value(10000); // 0.0001 BLK
+        feeValue = value(10000); // 0.0001 BLK
         minNonDust = value(1);
         softDustLimit = value(1000000); // 0.01 BLK
         softDustPolicy = SoftDustPolicy.AT_LEAST_BASE_FEE_IF_SOFT_DUST_TXO_PRESENT;
@@ -28,7 +28,7 @@ public class BlackcoinMain extends CoinType {
     }
 
     private static BlackcoinMain instance = new BlackcoinMain();
-    public static synchronized BlackcoinMain get() {
+    public static synchronized CoinType get() {
         return instance;
     }
 }
