@@ -16,22 +16,19 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import com.onix.core.coins.CoinType;
-import com.onix.core.messages.MessageFactory;
 import com.onix.core.messages.TxMessage;
+import com.onix.core.wallet.AbstractTransaction;
+import com.onix.core.wallet.AbstractTransaction.AbstractOutput;
 import com.onix.core.wallet.AbstractWallet;
 import com.onix.wallet.Constants;
 import com.onix.wallet.R;
 import com.onix.wallet.WalletApplication;
 import com.onix.wallet.util.ThrottlingWalletChangeListener;
+import com.onix.wallet.util.TimeUtils;
 import com.onix.wallet.util.UiUtils;
 import com.onix.wallet.util.WeakHandler;
 
 import org.acra.ACRA;
-import org.bitcoinj.core.Address;
-import org.bitcoinj.core.Sha256Hash;
-import org.bitcoinj.core.Transaction;
-import org.bitcoinj.core.TransactionConfidence;
-import org.bitcoinj.core.TransactionOutput;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,7 +41,7 @@ public class TransactionDetailsFragment extends Fragment {
 
     private static final int UPDATE_VIEW = 0;
 
-    private Sha256Hash txId;
+    private String txId;
     private String accountId;
     private AbstractWallet pocket;
     private CoinType type;
@@ -52,6 +49,8 @@ public class TransactionDetailsFragment extends Fragment {
     private ListView outputRows;
     private TransactionAmountVisualizerAdapter adapter;
     private TextView txStatusView;
+    private TextView txDateLabel;
+    private TextView txDate;
     private TextView txIdView;
     private TextView txMessageLabel;
     private TextView txMessage;
@@ -81,10 +80,10 @@ public class TransactionDetailsFragment extends Fragment {
         if (getArguments() != null) {
             accountId = getArguments().getString(Constants.ARG_ACCOUNT_ID);
         }
-        // TODO
         pocket = (AbstractWallet) getWalletApplication().getAccount(accountId);
         if (pocket == null) {
             Toast.makeText(getActivity(), R.string.no_such_pocket_error, Toast.LENGTH_LONG).show();
+            // TODO report anomaly
             return;
         }
         type = pocket.getCoinType();
@@ -102,6 +101,8 @@ public class TransactionDetailsFragment extends Fragment {
         View header = inflater.inflate(R.layout.fragment_transaction_details_header, null);
         outputRows.addHeaderView(header, null, false);
         txStatusView = (TextView) header.findViewById(R.id.tx_status);
+        txDateLabel = (TextView) header.findViewById(R.id.tx_date_label);
+        txDate = (TextView) header.findViewById(R.id.tx_date);
 
         // Footer
         View footer = inflater.inflate(R.layout.fragment_transaction_details_footer, null);
@@ -116,10 +117,7 @@ public class TransactionDetailsFragment extends Fragment {
         adapter = new TransactionAmountVisualizerAdapter(inflater.getContext(), pocket);
         outputRows.setAdapter(adapter);
 
-        String txIdString = getArguments().getString(Constants.ARG_TRANSACTION_ID);
-        if (txIdString != null) {
-            txId = new Sha256Hash(txIdString);
-        }
+        txId = getArguments().getString(Constants.ARG_TRANSACTION_ID);
 
         updateView();
 
@@ -133,10 +131,9 @@ public class TransactionDetailsFragment extends Fragment {
                 if (position >= outputRows.getHeaderViewsCount()) {
                     Object obj = parent.getItemAtPosition(position);
 
-                    if (obj != null && obj instanceof TransactionOutput) {
-                        TransactionOutput txo = (TransactionOutput) obj;
-                        Address address = txo.getScriptPubKey().getToAddress(type);
-                        UiUtils.startAddressActionMode(address, getActivity(), getFragmentManager());
+                    if (obj != null && obj instanceof AbstractOutput) {
+                        UiUtils.startAddressActionMode(((AbstractOutput) obj).getAddress(),
+                                getActivity(), getFragmentManager());
                     }
                 }
             }
@@ -155,7 +152,7 @@ public class TransactionDetailsFragment extends Fragment {
         if (txId == null) {
             cannotShowTxDetails();
         } else {
-            Transaction tx = pocket.getTransaction(txId);
+            AbstractTransaction tx = pocket.getTransaction(txId);
             if (tx == null) {
                 cannotShowTxDetails();
             } else {
@@ -164,13 +161,12 @@ public class TransactionDetailsFragment extends Fragment {
         }
     }
 
-    private void showTxDetails(AbstractWallet pocket, Transaction tx) {
-        TransactionConfidence confidence = tx.getConfidence();
+    private void showTxDetails(AbstractWallet pocket, AbstractTransaction tx) {
         String txStatusText;
-        switch (confidence.getConfidenceType()) {
+        switch (tx.getConfidenceType()) {
             case BUILDING:
                 txStatusText = getResources().getQuantityString(R.plurals.status_building,
-                        confidence.getDepthInBlocks(), confidence.getDepthInBlocks());
+                        tx.getDepthInBlocks(), tx.getDepthInBlocks());
                 break;
             case PENDING:
                 txStatusText = getString(R.string.status_pending);
@@ -181,16 +177,24 @@ public class TransactionDetailsFragment extends Fragment {
                 txStatusText = getString(R.string.status_unknown);
         }
         txStatusView.setText(txStatusText);
+        long timestamp = tx.getTimestamp();
+        if (timestamp > 0) {
+            txDate.setText(TimeUtils.toTimeString(getWalletApplication(), timestamp));
+            txDateLabel.setVisibility(View.VISIBLE);
+            txDate.setVisibility(View.VISIBLE);
+        } else {
+            txDateLabel.setVisibility(View.GONE);
+            txDate.setVisibility(View.GONE);
+        }
         adapter.setTransaction(tx);
         txIdView.setText(tx.getHashAsString());
         setupBlockExplorerLink(pocket.getCoinType(), tx.getHashAsString());
 
         // Show message
-        MessageFactory factory = type.getMessagesFactory();
-        if (factory != null) {
+        if (type.canHandleMessages() && tx.getMessage() != null) {
             try {
                 // TODO not efficient, should parse the message and save it to a database
-                TxMessage message = factory.extractPublicMessage(tx);
+                TxMessage message = tx.getMessage();
                 if (message != null) {
                     // TODO in the future other coin types could support private encrypted messages
                     txMessageLabel.setText(getString(R.string.tx_message_public));

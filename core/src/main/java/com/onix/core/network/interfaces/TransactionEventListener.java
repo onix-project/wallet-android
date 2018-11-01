@@ -2,26 +2,25 @@ package com.onix.core.network.interfaces;
 
 import com.onix.core.network.AddressStatus;
 import com.onix.core.network.BlockHeader;
-import com.onix.core.network.ServerClient;
-import org.bitcoinj.core.Transaction;
+import com.onix.core.network.ServerClient.HistoryTx;
 
 import java.util.List;
 
 /**
  * @author John L. Jegutanis
  */
-public interface TransactionEventListener {
+public interface TransactionEventListener<T> {
     void onNewBlock(BlockHeader header);
+
+    void onBlockUpdate(BlockHeader header);
 
     void onAddressStatusUpdate(AddressStatus status);
 
-//    void onUnspentTransactionUpdate(AddressStatus status, List<ServerClient.UnspentTx> unspentTxes);
+    void onTransactionHistory(AddressStatus status, List<HistoryTx> historyTxes);
 
-    void onTransactionHistory(AddressStatus status, List<ServerClient.HistoryTx> historyTxes);
+    void onTransactionUpdate(T transaction);
 
-    void onTransactionUpdate(Transaction tx);
+    void onTransactionBroadcast(T transaction);
 
-    void onTransactionBroadcast(Transaction transaction);
-
-    void onTransactionBroadcastError(Transaction tx);
+    void onTransactionBroadcastError(T transaction);
 }

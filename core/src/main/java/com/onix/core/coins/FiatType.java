@@ -42,6 +42,11 @@ public class FiatType implements ValueType {
     }
 
     @Override
+    public String getId() {
+        return getSymbol();
+    }
+
+    @Override
     public String getName() {
         return name;
     }
@@ -66,7 +71,7 @@ public class FiatType implements ValueType {
     }
 
     @Override
-    public Value minNonDust() {
+    public Value getMinNonDust() {
         return value(1);
     }
 

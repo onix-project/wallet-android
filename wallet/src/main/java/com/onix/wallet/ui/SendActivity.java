@@ -1,40 +1,24 @@
 package com.onix.wallet.ui;
 
+import android.content.Intent;
 import android.os.Bundle;
-import android.widget.Toast;
 
-import com.onix.core.wallet.WalletAccount;
-import com.onix.wallet.R;
-
-import org.bitcoinj.core.Transaction;
-
+import com.onix.wallet.Constants;
 
 /**
  * @author John L. Jegutanis
  */
-public class SendActivity extends BaseWalletActivity implements SendFragment.Listener {
+@Deprecated
+public class SendActivity extends BaseWalletActivity {
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        setContentView(R.layout.activity_fragment_wrapper);
+        Intent intent = new Intent(this, WalletActivity.class);
+        intent.putExtra(Constants.ARG_URI, getIntent().getDataString());
+        startActivity(intent);
 
-        if (savedInstanceState == null) {
-            getSupportFragmentManager().beginTransaction()
-                    .add(R.id.container, SendFragment.newInstance(getIntent().getData()))
-                    .commit();
-        }
-    }
-
-    @Override
-    public void onTransactionBroadcastSuccess(WalletAccount pocket, Transaction transaction) {
-        Toast.makeText(this, getString(R.string.sent_msg), Toast.LENGTH_LONG).show();
-        finish();
-    }
-
-    @Override
-    public void onTransactionBroadcastFailure(WalletAccount pocket, Transaction transaction) {
-        Toast.makeText(this, getString(R.string.get_tx_broadcast_error), Toast.LENGTH_LONG).show();
         finish();
     }
 }

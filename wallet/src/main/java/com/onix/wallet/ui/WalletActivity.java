@@ -2,6 +2,7 @@ package com.onix.wallet.ui;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.ActivityNotFoundException;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
@@ -10,9 +11,7 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
-import android.support.v4.app.Fragment;
-import android.support.v4.app.FragmentStatePagerAdapter;
-import android.support.v4.view.ViewPager;
+import android.support.v4.app.FragmentTransaction;
 import android.support.v4.widget.DrawerLayout;
 import android.support.v7.app.ActionBar;
 import android.support.v7.view.ActionMode;
@@ -21,22 +20,22 @@ import android.view.MenuItem;
 import android.widget.Toast;
 
 import com.onix.core.coins.CoinType;
+import com.onix.core.exceptions.AddressMalformedException;
 import com.onix.core.uri.CoinURI;
 import com.onix.core.uri.CoinURIParseException;
 import com.onix.core.util.GenericUtils;
+import com.onix.core.wallet.AbstractAddress;
+import com.onix.core.wallet.SerializedKey;
 import com.onix.core.wallet.WalletAccount;
 import com.onix.wallet.Constants;
 import com.onix.wallet.R;
 import com.onix.wallet.service.CoinService;
 import com.onix.wallet.service.CoinServiceImpl;
 import com.onix.wallet.tasks.CheckUpdateTask;
-import com.onix.wallet.util.Keyboard;
+import com.onix.wallet.ui.dialogs.TermsOfUseDialog;
 import com.onix.wallet.util.SystemUtils;
-import com.onix.wallet.util.UiUtils;
 import com.onix.wallet.util.WeakHandler;
 
-import org.bitcoinj.core.Address;
-import org.bitcoinj.core.AddressFormatException;
 import org.bitcoinj.core.Transaction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -47,7 +46,9 @@ import java.util.List;
 import javax.annotation.Nullable;
 
 import static com.onix.wallet.ui.NavDrawerItemType.ITEM_COIN;
+import static com.onix.wallet.ui.NavDrawerItemType.ITEM_OVERVIEW;
 import static com.onix.wallet.ui.NavDrawerItemType.ITEM_SECTION_TITLE;
+import static com.onix.wallet.ui.NavDrawerItemType.ITEM_TRADE;
 
 
 /**
@@ -55,19 +56,31 @@ import static com.onix.wallet.ui.NavDrawerItemType.ITEM_SECTION_TITLE;
  * @author Andreas Schildbach
  */
 final public class WalletActivity extends BaseWalletActivity implements
-        NavigationDrawerFragment.NavigationDrawerCallbacks, BalanceFragment.Listener,
-        SendFragment.Listener {
+        NavigationDrawerFragment.Listener,
+        AccountFragment.Listener, OverviewFragment.Listener, SelectCoinTypeDialog.Listener,
+        PayWithDialog.Listener, TermsOfUseDialog.Listener {
     private static final Logger log = LoggerFactory.getLogger(WalletActivity.class);
 
-    private static final int RECEIVE = 0;
-    private static final int BALANCE = 1;
-    private static final int SEND = 2;
 
     private static final int REQUEST_CODE_SCAN = 0;
     private static final int ADD_COIN = 1;
 
     private static final int TX_BROADCAST_OK = 0;
     private static final int TX_BROADCAST_ERROR = 1;
+    private static final int SET_URI = 2;
+    private static final int OPEN_ACCOUNT = 3;
+    private static final int OPEN_OVERVIEW = 4;
+    private static final int PROCESS_URI = 5;
+
+    // Fragment tags
+    private static final String ACCOUNT_TAG = "account_tag";
+    private static final String OVERVIEW_TAG = "overview_tag";
+    private static final String PAY_TO_DIALOG_TAG = "pay_to_dialog_tag";
+    private static final String PAY_WITH_DIALOG_TAG = "pay_with_dialog_tag";
+    private static final String TERMS_OF_USE_TAG = "terms_of_use_tag";
+
+    // Saved state variables
+    private static final String OVERVIEW_VISIBLE = "overview_visible";
 
     /**
      * Fragment managing the behaviors, interactions and presentation of the navigation drawer.
@@ -77,18 +90,17 @@ final public class WalletActivity extends BaseWalletActivity implements
     /**
      * Used to store the last screen title. For use in {@link #restoreActionBar()}.
      */
-    private CharSequence mTitle;
+    private CharSequence title;
 
-    /**
-     * For SharedPreferences, used to check if first launch ever.
-     */
-    private ViewPager mViewPager;
-    private AppSectionsPagerAdapter pagerAdapter;
-    private String currentAccountId;
+    @Nullable private String lastAccountId;
     private Intent connectCoinIntent;
+    private Intent connectAllCoinIntent;
     private List<NavDrawerItem> navDrawerItems = new ArrayList<>();
     private ActionMode lastActionMode;
     private final Handler handler = new MyHandler(this);
+    private boolean isOverviewVisible;
+    private OverviewFragment overviewFragment;
+    @Nullable private AccountFragment accountFragment;
 
     public WalletActivity() {}
 
@@ -103,26 +115,48 @@ final public class WalletActivity extends BaseWalletActivity implements
             return;
         }
 
-        if (getIntent().getBooleanExtra(Constants.ARG_TEST_WALLET, false)) {
-            new AlertDialog.Builder(this)
-                    .setTitle(R.string.test_wallet)
-                    .setMessage(R.string.test_wallet_message)
-                    .setPositiveButton(R.string.button_ok, null)
-                    .create().show();
+        if (savedInstanceState == null && !getConfiguration().getTermsAccepted()) {
+            TermsOfUseDialog.newInstance().show(getFM(), TERMS_OF_USE_TAG);
         }
 
+        lastAccountId = getWalletApplication().getConfiguration().getLastAccountId();
+        
+        // Create the overview and account fragments
+        FragmentTransaction tr = getFM().beginTransaction();
         if (savedInstanceState == null) {
             checkAlerts();
+
+            // Add overview fragment
+            overviewFragment = OverviewFragment.getInstance();
+            tr.add(R.id.contents, overviewFragment, OVERVIEW_TAG).hide(overviewFragment);
+
+            // When we have more than one account, show overview as default
+            List<WalletAccount> accounts = getAllAccounts();
+            if (accounts.size() > 1) {
+                handler.sendMessage(handler.obtainMessage(OPEN_OVERVIEW));
+            } else if (accounts.size() == 1) {
+                handler.sendMessage(handler.obtainMessage(OPEN_ACCOUNT, accounts.get(0)));
+            }
+            // Else no accounts, how to handle this case? TODO
+        } else {
+            isOverviewVisible = savedInstanceState.getBoolean(OVERVIEW_VISIBLE);
+            overviewFragment = (OverviewFragment) getFM().findFragmentByTag(OVERVIEW_TAG);
+            accountFragment = (AccountFragment) getFM().findFragmentByTag(ACCOUNT_TAG);
+
+            if (isOverviewVisible || accountFragment == null) {
+                tr.show(overviewFragment);
+                if (accountFragment != null) tr.hide(accountFragment);
+                setOverviewTitle();
+            } else {
+                tr.show(accountFragment).hide(overviewFragment);
+                setAccountTitle(accountFragment.getAccount());
+            }
         }
+        tr.commit();
 
-        mTitle = getTitle();
-
-//        Toolbar toolbar = (Toolbar) findViewById(R.id.toolbar);
-//        setSupportActionBar(toolbar);
-        getSupportActionBar().setElevation(0);
-
+        // Setup navigation bar
         mNavigationDrawerFragment = (NavigationDrawerFragment)
-                getSupportFragmentManager().findFragmentById(R.id.navigation_drawer);
+                getFM().findFragmentById(R.id.navigation_drawer);
         // Set up the drawer.
         createNavDrawerItems();
         mNavigationDrawerFragment.setUp(
@@ -130,34 +164,29 @@ final public class WalletActivity extends BaseWalletActivity implements
                 (DrawerLayout) findViewById(R.id.drawer_layout),
                 navDrawerItems);
 
-        // Set up the ViewPager, attaching the adapter and setting up a listener for when the
-        // user swipes between sections.
-        mViewPager = (ViewPager) findViewById(R.id.pager);
-        // Set OffscreenPageLimit to 2 because receive fragment draws a QR code and we don't
-        // want to re-render that if we go to the SendFragment and back
-        mViewPager.setOffscreenPageLimit(2);
-        mViewPager.setOnPageChangeListener(new ViewPager.OnPageChangeListener() {
-            @Override public void onPageScrolled(int pos, float posOffset, int posOffsetPixels) { }
-
-            @Override
-            public void onPageSelected(int position) {
-                if (position == BALANCE) Keyboard.hideKeyboard(WalletActivity.this);
-                finishActionMode();
-            }
-
-            @Override public void onPageScrollStateChanged(int state) {}
-        });
-
-        // Get the last used wallet pocket and select it
-        WalletAccount lastAccount = getAccount(getWalletApplication().getConfiguration().getLastAccountId());
-        if (lastAccount == null && getAllAccounts().size() > 0) {
-            lastAccount = getAllAccounts().get(0);
+        if (getIntent().hasExtra(Constants.ARG_URI)) {
+            handler.sendMessage(handler.obtainMessage(PROCESS_URI,
+                    getIntent().getStringExtra(Constants.ARG_URI)));
+            getIntent().removeExtra(Constants.ARG_URI);
         }
-        // TODO, when we are able to remove accounts, show a message when no accounts found
-        if (lastAccount != null) {
-            navDrawerSelectAccount(lastAccount, false);
-            openPocket(lastAccount, false);
+    }
+
+    private void setOverviewTitle() {
+        title = getResources().getString(R.string.title_activity_overview);
+    }
+
+    private void setAccountTitle(@Nullable WalletAccount account) {
+        if (account != null) {
+            title = account.getDescriptionOrCoinName();
+        } else {
+            title = "";
         }
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        outState.putBoolean(OVERVIEW_VISIBLE, isOverviewVisible);
     }
 
     private void navDrawerSelectAccount(@Nullable WalletAccount account, boolean closeDrawer) {
@@ -166,6 +195,20 @@ final public class WalletActivity extends BaseWalletActivity implements
             for (NavDrawerItem item : navDrawerItems) {
                 if (item.itemType == ITEM_COIN && account.getId().equals(item.itemData)) {
                     mNavigationDrawerFragment.setSelectedItem(position, closeDrawer);
+                    break;
+                }
+                position++;
+            }
+        }
+    }
+
+    private void navDrawerSelectOverview(boolean closeDrawer) {
+        if (mNavigationDrawerFragment != null) {
+            int position = 0;
+            for (NavDrawerItem item : navDrawerItems) {
+                if (item.itemType == ITEM_OVERVIEW) {
+                    mNavigationDrawerFragment.setSelectedItem(position, closeDrawer);
+                    break;
                 }
                 position++;
             }
@@ -174,13 +217,13 @@ final public class WalletActivity extends BaseWalletActivity implements
 
     private void createNavDrawerItems() {
         navDrawerItems.clear();
-		//ShapeShift Stuff
         //NavDrawerItem.addItem(navDrawerItems, ITEM_SECTION_TITLE, getString(R.string.navigation_drawer_services));
         //NavDrawerItem.addItem(navDrawerItems, ITEM_TRADE, getString(R.string.title_activity_trade), R.drawable.trade, null);
-        NavDrawerItem.addItem(navDrawerItems, ITEM_SECTION_TITLE, getString(R.string.navigation_drawer_wallet));
+        //NavDrawerItem.addItem(navDrawerItems, ITEM_SECTION_TITLE, getString(R.string.navigation_drawer_wallet));
+        //NavDrawerItem.addItem(navDrawerItems, ITEM_OVERVIEW, getString(R.string.title_activity_overview), R.drawable.ic_launcher, null);
         for (WalletAccount account : getAllAccounts()) {
-            CoinType type = account.getCoinType();
-            NavDrawerItem.addItem(navDrawerItems, ITEM_COIN, type.getName(), Constants.COINS_ICONS.get(type), account.getId());
+            NavDrawerItem.addItem(navDrawerItems, ITEM_COIN, account.getDescriptionOrCoinName(),
+                    Constants.COINS_ICONS.get(account.getCoinType()), account.getId());
         }
     }
 
@@ -189,15 +232,28 @@ final public class WalletActivity extends BaseWalletActivity implements
         super.onResume();
 
         getWalletApplication().startBlockchainService(CoinService.ServiceMode.CANCEL_COINS_RECEIVED);
-        connectCoinService();
-        //TODO
-//        checkLowStorageAlert();
+        connectAllCoinService();
+
+        // Restore the correct action bar shadow
+        if (getSupportActionBar() != null) {
+            if (isOverviewVisible) {
+                getSupportActionBar().setElevation(
+                        getResources().getDimensionPixelSize(R.dimen.active_elevation));
+            } else {
+                getSupportActionBar().setElevation(0);
+            }
+        }
     }
 
 
     @Override
     public void onLocalAmountClick() {
         startExchangeRates();
+    }
+
+    @Override
+    public void onRefresh() {
+        refreshWallet();
     }
 
     @Override
@@ -214,7 +270,7 @@ final public class WalletActivity extends BaseWalletActivity implements
     public void onAccountSelected(String accountId) {
         log.info("Coin selected {}", accountId);
 
-        openPocket(getAccount(accountId), false);
+        openAccount(accountId);
     }
 
     @Override
@@ -225,49 +281,114 @@ final public class WalletActivity extends BaseWalletActivity implements
     @Override
     public void onTradeSelected() {
         startActivity(new Intent(WalletActivity.this, TradeActivity.class));
-        // Reselect the current account as the trade is a separate activity
-        navDrawerSelectAccount(getAccount(currentAccountId), true);
+        // Reselect the last item as the trade is a separate activity
+        if (isOverviewVisible) {
+            navDrawerSelectOverview(true);
+        } else {
+            navDrawerSelectAccount(getAccount(lastAccountId), true);
+        }
     }
 
-    private void openPocket(WalletAccount account) {
-        openPocket(account, true);
+    @Override
+    public void onOverviewSelected() {
+        openOverview(false);
     }
 
-    private void openPocket(String accountId) {
-        openPocket(getAccount(accountId), true);
+    public void openOverview() {
+        openOverview(true);
     }
 
-    private void openPocket(WalletAccount account, boolean selectInNavDrawer) {
-        if (account != null && mViewPager != null && !account.getId().equals(currentAccountId)) {
-            currentAccountId = account.getId();
-            CoinType type = account.getCoinType();
-            mTitle = type.getName();
-            pagerAdapter = new AppSectionsPagerAdapter(this, account);
-            mViewPager.setAdapter(pagerAdapter);
-            mViewPager.setCurrentItem(BALANCE);
-            mViewPager.getAdapter().notifyDataSetChanged();
-            getWalletApplication().getConfiguration().touchLastAccountId(currentAccountId);
-            connectCoinService();
+    public void openOverview(boolean selectInNavDrawer) {
+        if (!isOverviewVisible && !isFinishing()) {
+            setOverviewTitle();
+            FragmentTransaction ft = getFM().beginTransaction();
+            ft.show(overviewFragment);
+            if (accountFragment != null) ft.hide(accountFragment);
+            ft.commit();
+            isOverviewVisible = true;
+            connectAllCoinService();
             if (selectInNavDrawer) {
-                navDrawerSelectAccount(account, true);
+                navDrawerSelectOverview(true);
+            }
+            // Restore the default action bar shadow
+            if (getSupportActionBar() != null) {
+                getSupportActionBar().setElevation(
+                        getResources().getDimensionPixelSize(R.dimen.active_elevation));
             }
         }
     }
 
-    private void connectCoinService() {
+    private void openAccount(WalletAccount account) {
+        openAccount(account, true);
+    }
+
+    private void openAccount(String accountId) {
+        openAccount(getAccount(accountId), true);
+    }
+
+    private void openAccount(WalletAccount account, boolean selectInNavDrawer) {
+        if (account != null && !isFinishing()) {
+            if (isAccountVisible(account)) return;
+
+            FragmentTransaction ft = getFM().beginTransaction();
+            ft.hide(overviewFragment);
+
+            // If this account fragment is hidden, show it
+            if (accountFragment != null && account.getId().equals(lastAccountId)) {
+                ft.show(accountFragment);
+            } else {
+                // Else create a new fragment for the new account
+                lastAccountId = account.getId();
+                if (accountFragment != null) ft.remove(accountFragment);
+                accountFragment = AccountFragment.getInstance(lastAccountId);
+                ft.add(R.id.contents, accountFragment, ACCOUNT_TAG);
+                getWalletApplication().getConfiguration().touchLastAccountId(lastAccountId);
+            }
+            ft.commit();
+
+            setAccountTitle(account);
+            isOverviewVisible = false;
+
+            connectCoinService(lastAccountId);
+            if (selectInNavDrawer) {
+                navDrawerSelectAccount(account, true);
+            }
+            // Hide the shadow of the action bar because the PagerTabStrip of the AccountFragment is visible
+            if (getSupportActionBar() != null) {
+                getSupportActionBar().setElevation(0);
+            }
+        }
+    }
+
+    private boolean isAccountVisible(WalletAccount account) {
+        return account != null && accountFragment != null &&
+                accountFragment.isVisible() && account.equals(accountFragment.getAccount());
+    }
+
+    private void connectCoinService(String accountId) {
         if (connectCoinIntent == null) {
             connectCoinIntent = new Intent(CoinService.ACTION_CONNECT_COIN, null,
                     getWalletApplication(), CoinServiceImpl.class);
         }
         // Open connection if needed or possible
-        connectCoinIntent.putExtra(Constants.ARG_ACCOUNT_ID, currentAccountId);
+        connectCoinIntent.putExtra(Constants.ARG_ACCOUNT_ID, accountId);
         getWalletApplication().startService(connectCoinIntent);
+    }
+
+    private void connectAllCoinService() {
+        if (connectAllCoinIntent == null) {
+            connectAllCoinIntent = new Intent(CoinService.ACTION_CONNECT_ALL_COIN, null,
+                    getWalletApplication(), CoinServiceImpl.class);
+        }
+        getWalletApplication().startService(connectAllCoinIntent);
     }
 
     public void restoreActionBar() {
         ActionBar actionBar = getSupportActionBar();
-        actionBar.setDisplayShowTitleEnabled(true);
-        actionBar.setTitle(mTitle);
+        if (actionBar != null) {
+            actionBar.setDisplayShowTitleEnabled(true);
+            actionBar.setTitle(title);
+        }
     }
 
     private void checkAlerts() {
@@ -341,7 +462,7 @@ final public class WalletActivity extends BaseWalletActivity implements
                         final String accountId = intent.getStringExtra(Constants.ARG_ACCOUNT_ID);
                         createNavDrawerItems();
                         mNavigationDrawerFragment.setItems(navDrawerItems);
-                        openPocket(accountId);
+                        openAccount(accountId);
                     }
                 }
             }
@@ -353,12 +474,16 @@ final public class WalletActivity extends BaseWalletActivity implements
         Toast.makeText(this, error, Toast.LENGTH_LONG).show();
     }
 
-    private void processInput(String input) throws CoinURIParseException, AddressFormatException {
+    private void processInput(String input) throws CoinURIParseException, AddressMalformedException {
         input = input.trim();
         try {
             processUri(input);
         } catch (final CoinURIParseException x) {
-            processAddress(input);
+            if (SerializedKey.isSerializedKey(input)) {
+                sweepWallet(input);
+            } else {
+                processAddress(input);
+            }
         }
     }
 
@@ -371,6 +496,11 @@ final public class WalletActivity extends BaseWalletActivity implements
             throw new CoinURIParseException(error);
         }
 
+        if (accountFragment != null && accountFragment.isVisible() && accountFragment.getAccount() != null) {
+            payWith(accountFragment.getAccount(), coinUri);
+            return;
+        }
+
         WalletAccount selectedAccount = null;
         List<WalletAccount> allAccounts = getAllAccounts();
         List<WalletAccount> sendFromAccounts = getAccounts(scannedType);
@@ -380,42 +510,38 @@ final public class WalletActivity extends BaseWalletActivity implements
             selectedAccount = allAccounts.get(0);
         }
 
-        if (coinUri.isAddressRequest() && selectedAccount != null) {
-            UiUtils.replyAddressRequest(this, coinUri, selectedAccount);
-            return;
-        }
+        // TODO rework the address request standard
+//        if (coinUri.isAddressRequest() && selectedAccount != null) {
+//            UiUtils.replyAddressRequest(this, coinUri, selectedAccount);
+//            return;
+//        }
 
         if (selectedAccount != null) {
-            setSendFromCoin(selectedAccount, coinUri);
+            payWith(selectedAccount, coinUri);
         } else {
             showPayWithDialog(coinUri);
         }
-
     }
 
-    private void processAddress(String addressStr) throws AddressFormatException, CoinURIParseException {
+    private void processAddress(String addressStr) throws CoinURIParseException, AddressMalformedException {
         List<CoinType> possibleTypes = GenericUtils.getPossibleTypes(addressStr);
-        WalletAccount currentAccount = getAccount(currentAccountId);
 
-        if (currentAccount != null && possibleTypes.contains(currentAccount.getCoinType())) {
-            Address address = new Address(currentAccount.getCoinType(), addressStr);
-            processUri(CoinURI.convertToCoinURI(address, null, null, null));
-        } else if (possibleTypes.size() == 1) {
-            Address address = new Address(possibleTypes.get(0), addressStr);
+        if (possibleTypes.size() == 1) {
+            AbstractAddress address = possibleTypes.get(0).newAddress(addressStr);
             processUri(CoinURI.convertToCoinURI(address, null, null, null));
         } else {
             // This address string could be more that one coin type so first check if this address
             // comes from an account to determine the type.
             List<WalletAccount> possibleAccounts = getAccounts(possibleTypes);
-            Address addressOfAccount = null;
+            AbstractAddress addressOfAccount = null;
             for (WalletAccount account : possibleAccounts) {
-                Address testAddress = new Address(account.getCoinType(), addressStr);
+                AbstractAddress testAddress = account.getCoinType().newAddress(addressStr);
                 if (account.isAddressMine(testAddress)) {
                     addressOfAccount = testAddress;
                     break;
                 }
             }
-            if (addressOfAccount != null) {
+            if (addressOfAccount != null){
                 // If address is from an account don't show a dialog.
                 processUri(CoinURI.convertToCoinURI(addressOfAccount, null, null, null));
             } else {
@@ -425,64 +551,38 @@ final public class WalletActivity extends BaseWalletActivity implements
         }
     }
 
-    private void showPayToDialog(String addressStr) {
-        if (selectCoinTypeDialog.getArguments() == null) {
-            selectCoinTypeDialog.setArguments(new Bundle());
-        }
-        selectCoinTypeDialog.getArguments().putString(Constants.ARG_ADDRESS_STRING, addressStr);
-        selectCoinTypeDialog.show(getSupportFragmentManager(), null);
+    public void showPayToDialog(String addressStr) {
+        Dialogs.dismissAllowingStateLoss(getFM(), PAY_TO_DIALOG_TAG);
+        SelectCoinTypeDialog.getInstance(addressStr).show(getFM(), PAY_TO_DIALOG_TAG);
     }
 
-    SelectCoinTypeDialog selectCoinTypeDialog = new SelectCoinTypeDialog() {
-        // FIXME crash when this dialog being restored from saved state
-        @Override
-        public void onAddressSelected(Address selectedAddress) {
-            try {
-                processUri(CoinURI.convertToCoinURI(selectedAddress, null, null, null));
-            } catch (CoinURIParseException e) {
-                showScanFailedMessage(e);
-            }
+    @Override
+    public void onAddressTypeSelected(AbstractAddress selectedAddress) {
+        try {
+            processUri(CoinURI.convertToCoinURI(selectedAddress, null, null, null));
+        } catch (CoinURIParseException e) {
+            showScanFailedMessage(e);
         }
-    };
+    }
 
     private void showPayWithDialog(CoinURI uri) {
-        if (payWithDialog.getArguments() == null) {
-            payWithDialog.setArguments(new Bundle());
-        }
-        payWithDialog.getArguments().putString(Constants.ARG_URI, uri.toUriString());
-        payWithDialog.show(getSupportFragmentManager(), null);
+        Dialogs.dismissAllowingStateLoss(getFM(), PAY_WITH_DIALOG_TAG);
+        PayWithDialog.getInstance(uri).show(getFM(), PAY_WITH_DIALOG_TAG);
     }
 
-    PayWithDialog payWithDialog = new PayWithDialog() {
-        // FIXME crash when this dialog being restored from saved state
-        @Override
-        public void payWith(WalletAccount account, CoinURI uri) {
-            setSendFromCoin(account, uri);
-        }
-    };
-
-    private void setSendFromCoin(final WalletAccount account, final CoinURI coinUri) {
-        if (mViewPager != null && mNavigationDrawerFragment != null) {
-            openPocket(account);
-            mViewPager.setCurrentItem(SEND);
-
-            try {
-                ((SendFragment) pagerAdapter.getItem(SEND)).updateStateFrom(coinUri);
-            } catch (CoinURIParseException e) {
-                showScanFailedMessage(e);
-            }
-        } else {
-            // Should not happen
-            Toast.makeText(this, R.string.error_generic, Toast.LENGTH_SHORT).show();
-        }
+    @Override
+    public void payWith(final WalletAccount account, final CoinURI coinUri) {
+        openAccount(account);
+        // Set url asynchronously as the account may need to open
+        handler.sendMessage(handler.obtainMessage(SET_URI, coinUri));
     }
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
+        // Only show items in the action bar relevant to this screen
+        // if the drawer is not showing. Otherwise, let the drawer
+        // decide what to show in the action bar.
         if (mNavigationDrawerFragment != null && !mNavigationDrawerFragment.isDrawerOpen()) {
-            // Only show items in the action bar relevant to this screen
-            // if the drawer is not showing. Otherwise, let the drawer
-            // decide what to show in the action bar.
             getMenuInflater().inflate(R.menu.global, menu);
             restoreActionBar();
             return true;
@@ -511,6 +611,12 @@ final public class WalletActivity extends BaseWalletActivity implements
         } else if (id == R.id.action_account_details) {
             accountDetails();
             return true;
+        } else if (id == R.id.action_sweep_wallet) {
+            sweepWallet(null);
+            return true;
+        } else if (id == R.id.action_support) {
+            sendSupportEmail();
+            return true;
         } else if (id == R.id.action_about) {
             startActivity(new Intent(WalletActivity.this, AboutActivity.class));
             return true;
@@ -519,8 +625,21 @@ final public class WalletActivity extends BaseWalletActivity implements
         return super.onOptionsItemSelected(item);
     }
 
+    private void sendSupportEmail() {
+        Intent intent = new Intent(Intent.ACTION_SENDTO);
+        intent.setData(Uri.parse("mailto:")); // only email apps should handle this
+        intent.putExtra(Intent.EXTRA_EMAIL, new String[]{Constants.SUPPORT_EMAIL});
+        intent.putExtra(Intent.EXTRA_SUBJECT, "");
+        try {
+            startActivity(Intent.createChooser(intent,
+                    getResources().getString(R.string.support_message)));
+        } catch (ActivityNotFoundException ex) {
+            Toast.makeText(this, R.string.error_generic, Toast.LENGTH_SHORT).show();
+        }
+    }
+
     void startExchangeRates() {
-        WalletAccount account = getAccount(currentAccountId);
+        WalletAccount account = getAccount(lastAccountId);
         if (account != null) {
             Intent intent = new Intent(this, ExchangeRatesActivity.class);
             intent.putExtra(Constants.ARG_COIN_ID, account.getCoinType().getId());
@@ -531,9 +650,9 @@ final public class WalletActivity extends BaseWalletActivity implements
     }
 
     void signVerifyMessage() {
-        if (isAccountExists(currentAccountId)) {
+        if (isAccountExists(lastAccountId)) {
             Intent intent = new Intent(this, SignVerifyMessageActivity.class);
-            intent.putExtra(Constants.ARG_ACCOUNT_ID, currentAccountId);
+            intent.putExtra(Constants.ARG_ACCOUNT_ID, lastAccountId);
             startActivity(intent);
         } else {
             Toast.makeText(this, R.string.no_wallet_pocket_selected, Toast.LENGTH_LONG).show();
@@ -541,9 +660,20 @@ final public class WalletActivity extends BaseWalletActivity implements
     }
 
     void accountDetails() {
-        if (isAccountExists(currentAccountId)) {
+        if (isAccountExists(lastAccountId)) {
             Intent intent = new Intent(this, AccountDetailsActivity.class);
-            intent.putExtra(Constants.ARG_ACCOUNT_ID, currentAccountId);
+            intent.putExtra(Constants.ARG_ACCOUNT_ID, lastAccountId);
+            startActivity(intent);
+        } else {
+            Toast.makeText(this, R.string.no_wallet_pocket_selected, Toast.LENGTH_LONG).show();
+        }
+    }
+
+    void sweepWallet(@Nullable String key) {
+        if (isAccountExists(lastAccountId)) {
+            Intent intent = new Intent(this, SweepWalletActivity.class);
+            intent.putExtra(Constants.ARG_ACCOUNT_ID, lastAccountId);
+            if (key != null) intent.putExtra(Constants.ARG_PRIVATE_KEY, key);
             startActivity(intent);
         } else {
             Toast.makeText(this, R.string.no_wallet_pocket_selected, Toast.LENGTH_LONG).show();
@@ -552,14 +682,16 @@ final public class WalletActivity extends BaseWalletActivity implements
 
     private void refreshWallet() {
         if (getWalletApplication().getWallet() != null) {
-            Intent intent = new Intent(CoinService.ACTION_RESET_ACCOUNT, null,
-                    getWalletApplication(), CoinServiceImpl.class);
-            intent.putExtra(Constants.ARG_ACCOUNT_ID, currentAccountId);
+            Intent intent;
+            if (isOverviewVisible) {
+                intent = new Intent(CoinService.ACTION_RESET_WALLET, null,
+                        getWalletApplication(), CoinServiceImpl.class);
+            } else {
+                intent = new Intent(CoinService.ACTION_RESET_ACCOUNT, null,
+                        getWalletApplication(), CoinServiceImpl.class);
+                intent.putExtra(Constants.ARG_ACCOUNT_ID, lastAccountId);
+            }
             getWalletApplication().startService(intent);
-            // FIXME, we get a crash if the activity is not restarted
-            Intent introIntent = new Intent(WalletActivity.this, WalletActivity.class);
-            startActivity(introIntent);
-            finish();
         }
     }
 
@@ -570,53 +702,103 @@ final public class WalletActivity extends BaseWalletActivity implements
 
     @Override
     public void onBackPressed() {
+        finishActionMode();
         if (mNavigationDrawerFragment != null && mNavigationDrawerFragment.isDrawerOpen()) {
             mNavigationDrawerFragment.closeDrawer();
             return;
         }
 
-        // If not in balance screen, back button brings us there
-        boolean screenChanged = goToBalance();
-        if (!screenChanged) {
+        List<WalletAccount> accounts = getAllAccounts();
+
+        if (accounts.size() > 1) {
+            if (isOverviewVisible) {
+                super.onBackPressed();
+            } else {
+                // If not in balance screen, back button brings us there
+                boolean screenChanged = goToBalance();
+                if (!screenChanged) {
+                    // When in balance screen, it brings us to the overview
+                    openOverview();
+                }
+            }
+        } else if (accounts.size() == 1) {
+            if (accountFragment != null && accountFragment.isVisible()) {
+                // If not in balance screen, back button brings us there
+                boolean screenChanged = goToBalance();
+                if (!screenChanged) {
+                    // When in balance screen, exit
+                    super.onBackPressed();
+                }
+            } else {
+                openAccount(accounts.get(0));
+            }
+        } else {
             super.onBackPressed();
         }
-        finishActionMode();
+    }
+
+    @SuppressWarnings("unused")
+    private boolean goToReceive() {
+        return accountFragment != null && accountFragment.isVisible() && accountFragment.goToReceive(true);
     }
 
     private boolean goToBalance() {
-        if (mViewPager != null && mViewPager.getCurrentItem() != BALANCE) {
-            mViewPager.setCurrentItem(BALANCE);
-            return true;
-        }
-        return false;
-    }
-
-    private boolean resetSend() {
-        if (pagerAdapter != null) {
-            ((SendFragment) pagerAdapter.getItem(SEND)).reset();
-            return true;
-        }
-        return false;
+        return accountFragment != null && accountFragment.isVisible() && accountFragment.goToBalance(true);
     }
 
     private boolean goToSend() {
-        if (mViewPager != null && mViewPager.getCurrentItem() != SEND) {
-            mViewPager.setCurrentItem(SEND);
-            return true;
-        }
-        return false;
+        return accountFragment != null && accountFragment.isVisible() && accountFragment.goToSend(true);
     }
 
+    private boolean resetSend() {
+        return accountFragment != null && accountFragment.isVisible() && accountFragment.resetSend();
+    }
+
+    @Override
     public void registerActionMode(ActionMode actionMode) {
         finishActionMode();
         lastActionMode = actionMode;
     }
+
+    @Override
+    public void onReceiveSelected() {
+        finishActionMode();
+    }
+
+    @Override
+    public void onBalanceSelected() {
+        finishActionMode();
+    }
+
+    @Override
+    public void onSendSelected() {
+        finishActionMode();
+    }
+
 
     private void finishActionMode() {
         if (lastActionMode != null) {
             lastActionMode.finish();
             lastActionMode = null;
         }
+    }
+
+    @Override
+    public void onAccountModified(WalletAccount account) {
+        // Recreate items
+        createNavDrawerItems();
+        mNavigationDrawerFragment.setItems(navDrawerItems);
+    }
+
+    @Override
+    public void onTermsAgree() {
+        getConfiguration().setTermAccepted(true);
+    }
+
+    @Override
+    public void onTermsDisagree() {
+        getConfiguration().setTermAccepted(false);
+        finish();
     }
 
     private static class MyHandler extends WeakHandler<WalletActivity> {
@@ -636,55 +818,26 @@ final public class WalletActivity extends BaseWalletActivity implements
                             Toast.LENGTH_LONG).show();
                     ref.goToSend();
                     break;
-            }
-        }
-    }
-
-    private static class AppSectionsPagerAdapter extends FragmentStatePagerAdapter {
-
-        private final WalletActivity walletActivity;
-        private final String accountId;
-        private AddressRequestFragment request;
-        private SendFragment send;
-        private BalanceFragment balance;
-
-        public AppSectionsPagerAdapter(WalletActivity walletActivity, WalletAccount account) {
-            super(walletActivity.getSupportFragmentManager());
-            this.walletActivity = walletActivity;
-            this.accountId = account.getId();
-        }
-
-        @Override
-        public Fragment getItem(int i) {
-            switch (i) {
-                case RECEIVE:
-                    if (request == null) request = AddressRequestFragment.newInstance(accountId);
-                    return request;
-                case SEND:
-                    if (send == null) send = SendFragment.newInstance(accountId);
-                    return send;
-                case BALANCE:
-                default:
-                    if (balance == null) balance = BalanceFragment.newInstance(accountId);
-                    return balance;
-            }
-        }
-
-        @Override
-        public int getCount() {
-            return 3;
-        }
-
-        @Override
-        public CharSequence getPageTitle(int position) {
-            switch (position) {
-                case RECEIVE:
-                    return walletActivity.getString(R.string.wallet_title_request);
-                case SEND:
-                    return walletActivity.getString(R.string.wallet_title_send);
-                case BALANCE:
-                default:
-                    return walletActivity.getString(R.string.wallet_title_balance);
+                case SET_URI:
+                    if (ref.accountFragment == null) {
+                        Toast.makeText(ref, ref.getString(R.string.no_wallet_pocket_selected),
+                                Toast.LENGTH_LONG).show();
+                    }
+                    ref.accountFragment.sendToUri((CoinURI) msg.obj);
+                    break;
+                case OPEN_ACCOUNT:
+                    ref.openAccount((WalletAccount) msg.obj);
+                    break;
+                case OPEN_OVERVIEW:
+                    ref.openOverview();
+                    break;
+                case PROCESS_URI:
+                    try {
+                        ref.processUri((String) msg.obj);
+                    } catch (CoinURIParseException e) {
+                        ref.showScanFailedMessage(e);
+                    }
+                    break;
             }
         }
     }

@@ -1,8 +1,7 @@
 package com.onix.wallet.ui;
 
-import android.app.Activity;
+import android.content.Context;
 import android.os.Bundle;
-import android.support.v4.app.DialogFragment;
 import android.support.v4.app.Fragment;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -13,6 +12,8 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
 
+import com.onix.core.coins.CoinType;
+import com.onix.core.wallet.AbstractAddress;
 import com.onix.core.wallet.SignedMessage;
 import com.onix.core.wallet.WalletAccount;
 import com.onix.wallet.Constants;
@@ -21,7 +22,6 @@ import com.onix.wallet.WalletApplication;
 import com.onix.wallet.tasks.SignVerifyMessageTask;
 import com.onix.wallet.util.Keyboard;
 
-import org.bitcoinj.core.Address;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,6 +39,8 @@ import static com.onix.core.Preconditions.checkState;
 public class SignVerifyMessageFragment extends Fragment {
     private static final Logger log = LoggerFactory.getLogger(SignVerifyMessageFragment.class);
 
+    private static final String PASSWORD_DIALOG_TAG = "password_dialog_tag";
+
     private AutoCompleteTextView signingAddressView;
     private TextView addressError;
     private EditText messageView;
@@ -47,7 +49,8 @@ public class SignVerifyMessageFragment extends Fragment {
     private Button signButton;
     private TextView signatureOK;
     private TextView signatureError;
-    private WalletAccount pocket;
+    private WalletAccount account;
+    private CoinType type;
     private WalletApplication application;
     private SignVerifyMessageTask signVerifyMessageTask;
 
@@ -79,9 +82,10 @@ public class SignVerifyMessageFragment extends Fragment {
         if (args != null) {
             if (args.containsKey(Constants.ARG_ACCOUNT_ID)) {
                 String accountId = args.getString(Constants.ARG_ACCOUNT_ID);
-                pocket = checkNotNull(application.getAccount(accountId));
+                account = checkNotNull(application.getAccount(accountId));
             }
-            checkNotNull(pocket, "No account selected");
+            checkNotNull(account, "No account selected");
+            type = account.getCoinType();
         } else {
             throw new RuntimeException("Must provide account ID");
         }
@@ -94,8 +98,8 @@ public class SignVerifyMessageFragment extends Fragment {
         View view = inflater.inflate(R.layout.fragment_sign_message, container, false);
 
         signingAddressView = (AutoCompleteTextView) view.findViewById(R.id.signing_address);
-        ArrayAdapter<Address> adapter = new ArrayAdapter<>(getActivity(), R.layout.item_simple,
-                pocket.getActiveAddresses());
+        ArrayAdapter<AbstractAddress> adapter = new ArrayAdapter<>(getActivity(), R.layout.item_simple,
+                account.getActiveAddresses());
         signingAddressView.setAdapter(adapter);
 
         messageView = (EditText) view.findViewById(R.id.message);
@@ -134,8 +138,8 @@ public class SignVerifyMessageFragment extends Fragment {
     }
 
     private void signMessage() {
-        if (pocket.isEncrypted()) {
-            signingPasswordDialog.show(getFragmentManager(), null);
+        if (account.isEncrypted()) {
+            showUnlockDialog();
         } else {
             maybeStartSigningTask();
         }
@@ -145,13 +149,10 @@ public class SignVerifyMessageFragment extends Fragment {
         maybeStartVerifyingTask();
     }
 
-    DialogFragment signingPasswordDialog = new UnlockWalletDialog() {
-        @Override
-        public void onPassword(CharSequence password) {
-            maybeStartSigningTask(password);
-        }
-        @Override public void onCancel() { }
-    };
+    private void showUnlockDialog() {
+        Dialogs.dismissAllowingStateLoss(getFragmentManager(), PASSWORD_DIALOG_TAG);
+        UnlockWalletDialog.getInstance().show(getFragmentManager(), PASSWORD_DIALOG_TAG);
+    }
 
     private void clearMessages() {
         addressError.setVisibility(View.GONE);
@@ -171,6 +172,16 @@ public class SignVerifyMessageFragment extends Fragment {
                 signatureOK.setVisibility(View.VISIBLE);
                 signatureOK.setText(R.string.message_verified);
                 break;
+            default:
+                showSignVerifyError(signedMessage.getStatus());
+        }
+    }
+
+    private void showSignVerifyError(SignedMessage.Status status) {
+        checkState(status != SignedMessage.Status.SignedOK);
+        checkState(status != SignedMessage.Status.VerifiedOK);
+        clearMessages();
+        switch (status) {
             case AddressMalformed:
                 addressError.setVisibility(View.VISIBLE);
                 addressError.setText(R.string.address_error);
@@ -199,7 +210,7 @@ public class SignVerifyMessageFragment extends Fragment {
         maybeStartSigningTask(null);
     }
 
-    private void maybeStartSigningTask(@Nullable CharSequence password) {
+    public void maybeStartSigningTask(@Nullable CharSequence password) {
         maybeStartSigningVerifyingTask(true, password);
     }
 
@@ -218,7 +229,7 @@ public class SignVerifyMessageFragment extends Fragment {
             } else {
                 signedMessage = new SignedMessage(address, message, signature);
             }
-            signVerifyMessageTask = new SignVerifyMessageTask(pocket, sign, password) {
+            signVerifyMessageTask = new SignVerifyMessageTask(account, sign, password) {
                 @Override
                 protected void onPostExecute(SignedMessage message) {
                     showSignVerifyStatus(message);
@@ -230,8 +241,8 @@ public class SignVerifyMessageFragment extends Fragment {
     }
 
     @Override
-    public void onAttach(Activity activity) {
-        super.onAttach(activity);
-        this.application = (WalletApplication) activity.getApplication();
+    public void onAttach(final Context context) {
+        super.onAttach(context);
+        this.application = (WalletApplication) context.getApplicationContext();
     }
 }

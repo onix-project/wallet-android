@@ -16,14 +16,17 @@ import com.onix.wallet.ExchangeRatesProvider.ExchangeRate;
 import com.onix.wallet.R;
 import com.onix.wallet.util.WalletUtils;
 
+import butterknife.Bind;
+import butterknife.ButterKnife;
+
 /**
  * @author John L. Jegutanis
  */
 public class CoinListItem extends LinearLayout implements Checkable {
-    private final TextView title;
-    private final ImageView icon;
-    private final View view;
-    private final Amount rateView;
+    final View view;
+    @Bind(R.id.item_icon) ImageView icon;
+    @Bind(R.id.item_text) TextView title;
+    @Bind(R.id.amount) Amount amount;
 
     private boolean isChecked = false;
     private CoinType type;
@@ -32,14 +35,12 @@ public class CoinListItem extends LinearLayout implements Checkable {
         super(context);
 
         view = LayoutInflater.from(context).inflate(R.layout.coin_list_row, this, true);
-        title = (TextView) findViewById(R.id.item_text);
-        icon = (ImageView) findViewById(R.id.item_icon);
-        rateView = (Amount) findViewById(R.id.exchange_rate);
+        ButterKnife.bind(this, view);
     }
 
     public void setAccount(WalletAccount account) {
         this.type = account.getCoinType();
-        title.setText(WalletUtils.getDescriptionOrCoinName(account));
+        title.setText(account.getDescriptionOrCoinName());
         icon.setImageResource(WalletUtils.getIconRes(account));
     }
 
@@ -52,12 +53,26 @@ public class CoinListItem extends LinearLayout implements Checkable {
     public void setExchangeRate(ExchangeRate exchangeRate) {
         if (exchangeRate != null && type != null) {
             Value localAmount = exchangeRate.rate.convert(type.oneCoin());
-            rateView.setAmount(GenericUtils.formatFiatValue(localAmount));
-            rateView.setSymbol(localAmount.type.getSymbol());
-            rateView.setVisibility(View.VISIBLE);
+            setFiatAmount(localAmount);
         } else {
-            rateView.setVisibility(View.GONE);
+            amount.setVisibility(View.GONE);
         }
+    }
+
+    public void setAmount(Value value) {
+        amount.setAmount(GenericUtils.formatCoinValue(value.type, value, true));
+        amount.setSymbol(value.type.getSymbol());
+        amount.setVisibility(View.VISIBLE);
+    }
+
+    private void setFiatAmount(Value value) {
+        amount.setAmount(GenericUtils.formatFiatValue(value));
+        amount.setSymbol(value.type.getSymbol());
+        amount.setVisibility(View.VISIBLE);
+    }
+
+    public void setAmountSingleLine(boolean isSingleLine) {
+        amount.setSingleLine(isSingleLine);
     }
 
     @Override

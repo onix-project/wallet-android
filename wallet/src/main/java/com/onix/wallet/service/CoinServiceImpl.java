@@ -15,13 +15,13 @@ import android.text.format.DateUtils;
 
 import com.onix.core.network.ConnectivityHelper;
 import com.onix.core.network.ServerClients;
+import com.onix.core.wallet.AbstractAddress;
 import com.onix.core.wallet.Wallet;
 import com.onix.core.wallet.WalletAccount;
 import com.onix.wallet.Configuration;
 import com.onix.wallet.Constants;
 import com.onix.wallet.WalletApplication;
 
-import org.bitcoinj.core.Address;
 import org.bitcoinj.core.Sha256Hash;
 import org.bitcoinj.core.Transaction;
 import org.slf4j.Logger;
@@ -42,8 +42,8 @@ import javax.annotation.CheckForNull;
 public class CoinServiceImpl extends Service implements CoinService {
     private WalletApplication application;
     private Configuration config;
-    private ConnectivityManager connManager;
     private ConnectivityHelper connHelper;
+    private BroadcastReceiver connectivityReceiver;
 
     @CheckForNull
     private ServerClients clients;
@@ -58,7 +58,7 @@ public class CoinServiceImpl extends Service implements CoinService {
 
     private int notificationCount = 0;
     private BigInteger notificationAccumulatedAmount = BigInteger.ZERO;
-    private final List<Address> notificationAddresses = new LinkedList<Address>();
+    private final List<AbstractAddress> notificationAddresses = new LinkedList<>();
     private AtomicInteger transactionsReceived = new AtomicInteger();
     private long serviceCreatedAt;
 
@@ -161,10 +161,16 @@ public class CoinServiceImpl extends Service implements CoinService {
 //    }
 //
 
-    private final BroadcastReceiver connectivityReceiver = new BroadcastReceiver() {
+    private class MyBroadcastReceiver extends BroadcastReceiver {
+        private final ConnectivityManager connectivityManager;
         private boolean hasConnectivity;
         private boolean hasStorage = true;
         private int currentNetworkType = -1;
+
+        public MyBroadcastReceiver(ConnectivityManager connectivityManager) {
+            this.connectivityManager = connectivityManager;
+            checkNetworkType();
+        }
 
         @Override
         public void onReceive(final Context context, final Intent intent) {
@@ -173,15 +179,7 @@ public class CoinServiceImpl extends Service implements CoinService {
             if (ConnectivityManager.CONNECTIVITY_ACTION.equals(action)) {
                 hasConnectivity = !intent.getBooleanExtra(ConnectivityManager.EXTRA_NO_CONNECTIVITY, false);
 
-                NetworkInfo activeInfo = connManager.getActiveNetworkInfo();
-                boolean isNetworkChanged;
-                if (activeInfo != null && activeInfo.isConnected()) {
-                    isNetworkChanged = currentNetworkType != activeInfo.getType();
-                    currentNetworkType = activeInfo.getType();
-                } else {
-                    isNetworkChanged = false;
-                    currentNetworkType = -1;
-                }
+                boolean isNetworkChanged = checkNetworkType();
                 log.info("network is " + (hasConnectivity ? "up" : "down"));
                 log.info("network type " + (isNetworkChanged ? "changed" : "didn't change"));
 
@@ -199,7 +197,20 @@ public class CoinServiceImpl extends Service implements CoinService {
             }
         }
 
-//        @SuppressLint("Wakelock")
+        private boolean checkNetworkType() {
+            boolean isNetworkChanged;
+            NetworkInfo activeInfo = connectivityManager.getActiveNetworkInfo();
+            if (activeInfo != null && activeInfo.isConnected()) {
+                isNetworkChanged = currentNetworkType != activeInfo.getType();
+                currentNetworkType = activeInfo.getType();
+            } else {
+                isNetworkChanged = false;
+                currentNetworkType = -1;
+            }
+            return isNetworkChanged;
+        }
+
+        //        @SuppressLint("Wakelock")
         private void check(boolean isNetworkChanged) {
             Wallet wallet = application.getWallet();
             final boolean hasEverything = hasConnectivity && hasStorage && (wallet != null);
@@ -210,7 +221,7 @@ public class CoinServiceImpl extends Service implements CoinService {
 
                 log.info("Creating coins clients");
                 clients = getServerClients(wallet);
-                if (lastAccount != null) clients.startAsync(wallet.getAccount(lastAccount));
+//                if (lastAccount != null) clients.startAsync(wallet.getAccount(lastAccount));
             } else if (hasEverything && isNetworkChanged) {
                 log.info("Restarting coins clients as network changed");
                 clients.resetConnections();
@@ -225,7 +236,11 @@ public class CoinServiceImpl extends Service implements CoinService {
     };
 
     private ServerClients getServerClients(Wallet wallet) {
-        return new ServerClients(Constants.DEFAULT_COINS_SERVERS, connHelper);
+        ServerClients newClients = new ServerClients(Constants.DEFAULT_COINS_SERVERS, connHelper);
+        if (application.getTxCachePath() != null) {
+            newClients.setCacheDir(application.getTxCachePath(), Constants.TX_CACHE_SIZE);
+        }
+        return newClients;
     }
 
     private final BroadcastReceiver tickReceiver = new BroadcastReceiver() {
@@ -234,7 +249,7 @@ public class CoinServiceImpl extends Service implements CoinService {
             log.debug("Received a tick {}", intent);
 
             if (clients != null) {
-                clients.ping();
+                clients.ping(application.getVersionString());
             }
 
             long lastStop = application.getLastStop();
@@ -286,9 +301,10 @@ public class CoinServiceImpl extends Service implements CoinService {
 
         application = (WalletApplication) getApplication();
         config = application.getConfiguration();
-        connManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        ConnectivityManager connManager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
         connHelper = getConnectivityHelper(connManager);
 
+        connectivityReceiver = new MyBroadcastReceiver(connManager);
         final IntentFilter intentFilter = new IntentFilter();
         intentFilter.addAction(ConnectivityManager.CONNECTIVITY_ACTION);
         intentFilter.addAction(Intent.ACTION_DEVICE_STORAGE_LOW);
@@ -328,20 +344,20 @@ public class CoinServiceImpl extends Service implements CoinService {
                 Wallet wallet = application.getWallet();
                 if (intent.hasExtra(Constants.ARG_ACCOUNT_ID)) {
                     String accountId = intent.getStringExtra(Constants.ARG_ACCOUNT_ID);
-                    WalletAccount pocket = wallet.getAccount(accountId);
-                    if (pocket != null) {
-                        pocket.refresh();
+                    WalletAccount account = wallet.getAccount(accountId);
+                    if (account != null) {
+                        account.refresh();
 
                         if (clients == null) {
                             if (connHelper.isConnected()) {
                                 clients = getServerClients(wallet);
-                                clients.startAsync(pocket);
+                                clients.startAsync(account);
                             }
                         } else {
-                            clients.resetAccount(pocket);
+                            clients.resetAccount(account);
                         }
                     } else {
-                        log.warn("Tried to start a service for account id {} but no pocket found.",
+                        log.warn("Tried to start a service for account id {} but no account found.",
                                 accountId);
                     }
 
@@ -351,24 +367,59 @@ public class CoinServiceImpl extends Service implements CoinService {
             } else {
                 log.warn("Got wallet reset intent, but no wallet is available");
             }
+        } else if (CoinService.ACTION_RESET_WALLET.equals(action)) {
+            if (application.getWallet() != null) {
+                Wallet wallet = application.getWallet();
+
+                if (clients == null) {
+                    if (connHelper.isConnected()) {
+                        clients = getServerClients(wallet);
+                    }
+                }
+
+                for (WalletAccount account : wallet.getAllAccounts()) {
+                    account.refresh();
+
+                    if (clients != null) {
+                        clients.startOrResetAccountAsync(account);
+                    }
+                }
+            } else {
+                log.warn("Got wallet reset intent, but no wallet is available");
+            }
         } else if (CoinService.ACTION_CONNECT_COIN.equals(action)) {
             if (application.getWallet() != null) {
                 Wallet wallet = application.getWallet();
                 if (intent.hasExtra(Constants.ARG_ACCOUNT_ID)) {
                     lastAccount = intent.getStringExtra(Constants.ARG_ACCOUNT_ID);
-                    WalletAccount pocket = wallet.getAccount(lastAccount);
-                    if (pocket != null) {
+                    WalletAccount account = wallet.getAccount(lastAccount);
+                    if (account != null) {
                         if (clients == null && connHelper.isConnected()) {
                             clients = getServerClients(wallet);
                         }
 
-                        if (clients != null) clients.startAsync(pocket);
+                        if (clients != null) clients.startAsync(account);
                     } else {
-                        log.warn("Tried to start a service for account id {} but no pocket found.",
+                        log.warn("Tried to start a service for account id {} but no account found.",
                                 lastAccount);
                     }
                 } else {
                     log.warn("Missing account id argument, not doing anything");
+                }
+            } else {
+                log.error("Got connect coin intent, but no wallet is available");
+            }
+        } else if (CoinService.ACTION_CONNECT_ALL_COIN.equals(action)) {
+            if (application.getWallet() != null) {
+                Wallet wallet = application.getWallet();
+                if (clients == null && connHelper.isConnected()) {
+                    clients = getServerClients(wallet);
+                }
+
+                if (clients != null) {
+                    for (WalletAccount account : wallet.getAllAccounts()) {
+                        clients.startAsync(account);
+                    }
                 }
             } else {
                 log.error("Got connect coin intent, but no wallet is available");

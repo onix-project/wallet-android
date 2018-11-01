@@ -4,12 +4,17 @@ import android.content.SharedPreferences;
 import android.content.SharedPreferences.OnSharedPreferenceChangeListener;
 import android.text.format.DateUtils;
 
+import com.onix.core.coins.CoinType;
+import com.onix.core.coins.Value;
 import com.onix.wallet.util.WalletUtils;
+import com.google.common.collect.ImmutableMap;
 
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.Map;
 
 import javax.annotation.Nullable;
 
@@ -34,6 +39,7 @@ public class Configuration {
     public static final String PREFS_KEY_BTC_PRECISION = "btc_precision";
     public static final String PREFS_KEY_CONNECTIVITY_NOTIFICATION = "connectivity_notification";
     public static final String PREFS_KEY_EXCHANGE_CURRENCY = "exchange_currency";
+    public static final String PREFS_KEY_FEES = "fees";
     public static final String PREFS_KEY_DISCLAIMER = "disclaimer";
     public static final String PREFS_KEY_SELECTED_ADDRESS = "selected_address";
 
@@ -50,6 +56,8 @@ public class Configuration {
 
     public static final String PREFS_KEY_DEVICE_COMPATIBLE = "device_compatible";
 
+    public static final String PREFS_KEY_TERMS_ACCEPTED = "terms_accepted";
+
     private static final int PREFS_DEFAULT_BTC_SHIFT = 3;
     private static final int PREFS_DEFAULT_BTC_PRECISION = 2;
 
@@ -59,6 +67,14 @@ public class Configuration {
         this.prefs = prefs;
 
         this.lastVersionCode = prefs.getInt(PREFS_KEY_LAST_VERSION, 0);
+    }
+
+    public void registerOnSharedPreferenceChangeListener(final OnSharedPreferenceChangeListener listener) {
+        prefs.registerOnSharedPreferenceChangeListener(listener);
+    }
+
+    public void unregisterOnSharedPreferenceChangeListener(final OnSharedPreferenceChangeListener listener) {
+        prefs.unregisterOnSharedPreferenceChangeListener(listener);
     }
 
     public void updateLastVersionCode(final int currentVersionCode) {
@@ -107,6 +123,57 @@ public class Configuration {
         }
     }
 
+    public Map<CoinType, Value> getFeeValues() {
+        JSONObject feesJson = getFeesJson();
+        ImmutableMap.Builder<CoinType, Value> feesMapBuilder = ImmutableMap.builder();
+
+        for (CoinType type : Constants.SUPPORTED_COINS) {
+            Value fee = getFeeFromJson(feesJson, type);
+            feesMapBuilder.put(type, fee);
+        }
+
+        return feesMapBuilder.build();
+    }
+
+    public Value getFeeValue(CoinType type) {
+        return getFeeFromJson(getFeesJson(), type);
+    }
+
+    public void resetFeeValue(CoinType type) {
+        JSONObject feesJson = getFeesJson();
+        feesJson.remove(type.getId());
+        prefs.edit().putString(PREFS_KEY_FEES, feesJson.toString()).apply();
+
+    }
+
+    public void setFeeValue(final Value feeValue) {
+        JSONObject feesJson = getFeesJson();
+        try {
+            feesJson.put(feeValue.type.getId(), feeValue.toUnitsString());
+        } catch (JSONException e) {
+            // Should not happen
+            log.error("Error setting fee value", e);
+        }
+        prefs.edit().putString(PREFS_KEY_FEES, feesJson.toString()).apply();
+    }
+
+    private Value getFeeFromJson(JSONObject feesJson, CoinType type) {
+        String feeStr = feesJson.optString(type.getId());
+        if (feeStr.isEmpty()) {
+            return type.getDefaultFeeValue();
+        } else {
+            return Value.valueOf(type, feeStr);
+        }
+    }
+
+    private JSONObject getFeesJson() {
+        try {
+            return new JSONObject(prefs.getString(PREFS_KEY_FEES, ""));
+        } catch (JSONException e) {
+            return new JSONObject();
+        }
+    }
+
     /**
      * Returns the user selected currency. If defaultFallback is set to true it return a default
      * currency is no user selected setting found.
@@ -151,14 +218,6 @@ public class Configuration {
         edit.apply();
     }
 
-    public void registerOnSharedPreferenceChangeListener(final OnSharedPreferenceChangeListener listener) {
-        prefs.registerOnSharedPreferenceChangeListener(listener);
-    }
-
-    public void unregisterOnSharedPreferenceChangeListener(final OnSharedPreferenceChangeListener listener) {
-        prefs.unregisterOnSharedPreferenceChangeListener(listener);
-    }
-
     public boolean getLastExchangeDirection() {
         return prefs.getBoolean(PREFS_KEY_LAST_EXCHANGE_DIRECTION, true);
     }
@@ -171,12 +230,20 @@ public class Configuration {
         return prefs.getBoolean(PREFS_KEY_MANUAL_RECEIVING_ADDRESSES, false);
     }
 
-
     public void setDeviceCompatible(final boolean isDeviceCompatible) {
         prefs.edit().putBoolean(PREFS_KEY_DEVICE_COMPATIBLE, isDeviceCompatible).apply();
     }
 
     public boolean isDeviceCompatible() {
-        return prefs.getBoolean(PREFS_KEY_DEVICE_COMPATIBLE, true);
+        return prefs.getBoolean(PREFS_KEY_DEVICE_COMPATIBLE, false);
     }
+
+    public boolean getTermsAccepted() {
+        return prefs.getBoolean(PREFS_KEY_TERMS_ACCEPTED, false);
+    }
+
+    public void setTermAccepted(final boolean isTermsAccepted) {
+        prefs.edit().putBoolean(PREFS_KEY_TERMS_ACCEPTED, isTermsAccepted).apply();
+    }
+
 }

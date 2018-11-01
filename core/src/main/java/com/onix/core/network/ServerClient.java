@@ -1,23 +1,26 @@
 package com.onix.core.network;
 
 import com.onix.core.coins.CoinType;
-import com.onix.core.network.interfaces.BlockchainConnection;
+import com.onix.core.exceptions.AddressMalformedException;
 import com.onix.core.network.interfaces.ConnectionEventListener;
 import com.onix.core.network.interfaces.TransactionEventListener;
+import com.onix.core.wallet.AbstractAddress;
+import com.onix.core.wallet.families.bitcoin.BitAddress;
+import com.onix.core.wallet.families.bitcoin.BitBlockchainConnection;
+import com.onix.core.wallet.families.bitcoin.BitTransaction;
+import com.onix.core.wallet.families.bitcoin.BitTransactionEventListener;
 import com.onix.stratumj.ServerAddress;
 import com.onix.stratumj.StratumClient;
 import com.onix.stratumj.messages.CallMessage;
 import com.onix.stratumj.messages.ResultMessage;
 import com.google.common.collect.ImmutableList;
+import com.google.common.io.Files;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.Service;
 
-import org.bitcoinj.core.Address;
-import org.bitcoinj.core.AddressFormatException;
 import org.bitcoinj.core.Sha256Hash;
-import org.bitcoinj.core.Transaction;
 import org.bitcoinj.core.TransactionOutPoint;
 import org.bitcoinj.core.Utils;
 import org.bitcoinj.utils.ListenerRegistration;
@@ -28,6 +31,8 @@ import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -47,10 +52,12 @@ import static com.google.common.util.concurrent.Service.State.NEW;
 /**
  * @author John L. Jegutanis
  */
-public class ServerClient implements BlockchainConnection {
+public class ServerClient implements BitBlockchainConnection {
     private static final Logger log = LoggerFactory.getLogger(ServerClient.class);
 
     private static final ScheduledThreadPoolExecutor connectionExec;
+    private static final String CLIENT_PROTOCOL = "0.9";
+
     static {
         connectionExec = new ScheduledThreadPoolExecutor(1);
         // FIXME, causing a crash in old Androids
@@ -59,6 +66,7 @@ public class ServerClient implements BlockchainConnection {
     private static final Random RANDOM = new Random();
 
     private static final long MAX_WAIT = 16;
+    private static final long CONNECTION_STABILIZATION = 30;
     private final ConnectivityHelper connectivityHelper;
 
     private CoinType type;
@@ -67,29 +75,48 @@ public class ServerClient implements BlockchainConnection {
     private ServerAddress lastServerAddress;
     private StratumClient stratumClient;
     private long retrySeconds = 0;
+    private long reconnectAt = 0;
     private boolean stopped = false;
+
+    private File cacheDir;
+    private int cacheSize;
 
     // TODO, only one is supported at the moment. Change when accounts are supported.
     private transient CopyOnWriteArrayList<ListenerRegistration<ConnectionEventListener>> eventListeners;
 
+    private void reschedule(Runnable r, long delay, TimeUnit unit) {
+        connectionExec.remove(r);
+        connectionExec.schedule(r, delay, unit);
+    }
+
     private Runnable reconnectTask = new Runnable() {
-        public boolean isPolling = false;
         @Override
         public void run() {
             if (!stopped) {
-                if (connectivityHelper.isConnected()) {
-                    createStratumClient().startAsync();
-                    isPolling = false;
+                long reconnectIn = Math.max(reconnectAt - System.currentTimeMillis(), 0);
+                // Check if we must reconnect in the next second
+                if (reconnectIn < 1000) {
+                    if (connectivityHelper.isConnected()) {
+                        createStratumClient().startAsync();
+                    } else {
+                        // Start polling for connection to become available
+                        reschedule(reconnectTask, 1, TimeUnit.SECONDS);
+                    }
                 } else {
-                    // Start polling for connection to become available
-                    if (!isPolling) log.info("No connectivity, starting polling.");
-                    connectionExec.remove(reconnectTask);
-                    connectionExec.schedule(reconnectTask, 1, TimeUnit.SECONDS);
-                    isPolling = true;
+                    reschedule(reconnectTask, reconnectIn, TimeUnit.MILLISECONDS);
                 }
             } else {
                 log.info("{} client stopped, aborting reconnect.", type.getName());
-                isPolling = false;
+            }
+        }
+    };
+
+    private Runnable connectionCheckTask = new Runnable() {
+        @Override
+        public void run() {
+            if (isActivelyConnected()) {
+                reconnectAt = 0;
+                retrySeconds = 0;
             }
         }
     };
@@ -101,7 +128,9 @@ public class ServerClient implements BlockchainConnection {
             if (isActivelyConnected()) {
                 log.info("{} client connected to {}", type.getName(), lastServerAddress);
                 broadcastOnConnection();
-                retrySeconds = 0;
+
+                // Test that the connection is stable
+                reschedule(connectionCheckTask, CONNECTION_STABILIZATION, TimeUnit.SECONDS);
             }
         }
 
@@ -115,8 +144,10 @@ public class ServerClient implements BlockchainConnection {
             // Try to restart
             if (!stopped) {
                 log.info("Reconnecting {} in {} seconds", type.getName(), retrySeconds);
+                connectionExec.remove(connectionCheckTask);
                 connectionExec.remove(reconnectTask);
                 if (retrySeconds > 0) {
+                    reconnectAt = System.currentTimeMillis() + retrySeconds * 1000;
                     connectionExec.schedule(reconnectTask, retrySeconds, TimeUnit.SECONDS);
                 } else {
                     connectionExec.execute(reconnectTask);
@@ -144,11 +175,11 @@ public class ServerClient implements BlockchainConnection {
     }
 
     private ServerAddress getServerAddress() {
-        // If we blacklisted all servers, reset and increase back-off time
+        // If we blacklisted all servers, reset
         if (failedAddresses.size() == addresses.size()) {
             failedAddresses.clear();
-            retrySeconds = Math.min(Math.max(1, retrySeconds * 2), MAX_WAIT);
         }
+        retrySeconds = Math.min(Math.max(1, retrySeconds * 2), MAX_WAIT);
 
         ServerAddress address;
         // Not the most efficient, but does the job
@@ -168,7 +199,7 @@ public class ServerClient implements BlockchainConnection {
 
         Service.State state = stratumClient.state();
         if (state != NEW || stopped) {
-            log.info("Not starting service as it is already started or explicitly stopped");
+            log.debug("Not starting service as it is already started or explicitly stopped");
             return;
         }
 
@@ -232,6 +263,7 @@ public class ServerClient implements BlockchainConnection {
      * Adds an event listener object. Methods on this object are called when something interesting happens,
      * like new connection to a server. The listener is executed by {@link org.bitcoinj.utils.Threading#USER_THREAD}.
      */
+    @Override
     public void addEventListener(ConnectionEventListener listener) {
         addEventListener(listener, Threading.USER_THREAD);
     }
@@ -321,14 +353,15 @@ public class ServerClient implements BlockchainConnection {
                 if (t instanceof CancellationException) {
                     log.debug("Canceling {} call", callMessage.getMethod());
                 } else {
-                    log.error("Could not get reply for blockchain headers subscribe", t);
+                    log.error("Could not get reply for {} blockchain headers subscribe: {}",
+                            type.getName(), t.getMessage());
                 }
             }
         }, Threading.USER_THREAD);
     }
 
     @Override
-    public void subscribeToAddresses(List<Address> addresses, final TransactionEventListener listener) {
+    public void subscribeToAddresses(List<AbstractAddress> addresses, final TransactionEventListener<BitTransaction> listener) {
         checkNotNull(stratumClient);
 
         final CallMessage callMessage = new CallMessage("blockchain.address.subscribe", (List)null);
@@ -338,7 +371,7 @@ public class ServerClient implements BlockchainConnection {
             @Override
             public void handle(CallMessage message) {
                 try {
-                    Address address = new Address(type, message.getParams().getString(0));
+                    AbstractAddress address = BitAddress.from(type, message.getParams().getString(0));
                     AddressStatus status;
                     if (message.getParams().isNull(1)) {
                         status = new AddressStatus(address, null);
@@ -347,7 +380,7 @@ public class ServerClient implements BlockchainConnection {
                         status = new AddressStatus(address, message.getParams().getString(1));
                     }
                     listener.onAddressStatusUpdate(status);
-                } catch (AddressFormatException e) {
+                } catch (AddressMalformedException e) {
                     log.error("Address subscribe sent a malformed address", e);
                 } catch (JSONException e) {
                     log.error("Unexpected JSON format", e);
@@ -355,8 +388,8 @@ public class ServerClient implements BlockchainConnection {
             }
         };
 
-        for (final Address address : addresses) {
-            log.info("Going to subscribe to {}", address);
+        for (final AbstractAddress address : addresses) {
+            log.debug("Going to subscribe to {}", address);
             callMessage.setParam(address.toString());
 
             ListenableFuture<ResultMessage> reply = stratumClient.subscribe(callMessage, addressHandler);
@@ -369,8 +402,7 @@ public class ServerClient implements BlockchainConnection {
                     try {
                         if (result.getResult().isNull(0)) {
                             status = new AddressStatus(address, null);
-                        }
-                        else {
+                        } else {
                             status = new AddressStatus(address, result.getResult().getString(0));
                         }
                         listener.onAddressStatusUpdate(status);
@@ -382,9 +414,10 @@ public class ServerClient implements BlockchainConnection {
                 @Override
                 public void onFailure(Throwable t) {
                     if (t instanceof CancellationException) {
-                        log.debug("Canceling {} call", callMessage.getMethod());
+                        log.info("Canceling {} call", callMessage.getMethod());
                     } else {
-                        log.error("Could not get reply for address subscribe", t);
+                        log.error("Could not get reply for {} address subscribe {}: ",
+                                type.getName(), address, t.getMessage());
                     }
                 }
             }, Threading.USER_THREAD);
@@ -392,7 +425,41 @@ public class ServerClient implements BlockchainConnection {
     }
 
     @Override
-    public void getHistoryTx(final AddressStatus status, final TransactionEventListener listener) {
+    public void getUnspentTx(final AddressStatus status,
+                             final BitTransactionEventListener listener) {
+        checkNotNull(stratumClient);
+
+        CallMessage message = new CallMessage("blockchain.address.listunspent",
+                Arrays.asList(status.getAddress().toString()));
+        final ListenableFuture<ResultMessage> result = stratumClient.call(message);
+
+        Futures.addCallback(result, new FutureCallback<ResultMessage>() {
+
+            @Override
+            public void onSuccess(ResultMessage result) {
+                JSONArray resTxs = result.getResult();
+                ImmutableList.Builder<UnspentTx> utxes = ImmutableList.builder();
+                try {
+                    for (int i = 0; i < resTxs.length(); i++) {
+                        utxes.add(new UnspentTx(resTxs.getJSONObject(i)));
+                    }
+                } catch (JSONException e) {
+                    onFailure(e);
+                    return;
+                }
+                listener.onUnspentTransactionUpdate(status, utxes.build());
+            }
+
+            @Override
+            public void onFailure(Throwable t) {
+                log.error("Could not get reply for blockchain.address.listunspent", t);
+            }
+        }, Threading.USER_THREAD);
+    }
+
+    @Override
+    public void getHistoryTx(final AddressStatus status,
+                             final TransactionEventListener<BitTransaction> listener) {
         checkNotNull(stratumClient);
 
         final CallMessage message = new CallMessage("blockchain.address.get_history",
@@ -428,11 +495,49 @@ public class ServerClient implements BlockchainConnection {
     }
 
     @Override
-    public void getTransaction(final Sha256Hash txHash, final TransactionEventListener listener) {
+    public void getTransaction(final Sha256Hash txHash,
+                               final TransactionEventListener<BitTransaction> listener) {
+
+        if (cacheDir != null) {
+            Threading.USER_THREAD.execute(new Runnable() {
+                @Override
+                public void run() {
+                    File txCachedFile = getTxCacheFile(txHash);
+                    if (txCachedFile.exists()) {
+                        try {
+                            byte[] txBytes = Files.toByteArray(txCachedFile);
+                            BitTransaction tx = new BitTransaction(type, txBytes);
+                            if (!tx.getHash().equals(txHash)) {
+                                if (!txCachedFile.delete()) {
+                                    log.warn("Error deleting cached transaction {}", txCachedFile);
+                                }
+                            } else {
+                                listener.onTransactionUpdate(tx);
+                                return;
+                            }
+                        } catch (IOException e) {
+                            log.warn("Error reading cached transaction", e);
+                        }
+                    }
+                    // Fallback to fetching from the network
+                    getTransactionFromNetwork(txHash, listener);
+                }
+            });
+        } else {
+            // Caching disabled, fetch from network
+            getTransactionFromNetwork(txHash, listener);
+        }
+    }
+
+    private File getTxCacheFile(Sha256Hash txHash) {
+        return new File(new File(checkNotNull(cacheDir), type.getId()), txHash.toString());
+    }
+
+    private void getTransactionFromNetwork(final Sha256Hash txHash, final TransactionEventListener<BitTransaction> listener) {
         checkNotNull(stratumClient);
 
-        final CallMessage message = new CallMessage("blockchain.transaction.get",
-                Arrays.asList(txHash.toString()));
+        final CallMessage message = new CallMessage("blockchain.transaction.get", txHash.toString());
+
         final ListenableFuture<ResultMessage> result = stratumClient.call(message);
 
         Futures.addCallback(result, new FutureCallback<ResultMessage>() {
@@ -441,14 +546,21 @@ public class ServerClient implements BlockchainConnection {
             public void onSuccess(ResultMessage result) {
                 try {
                     String rawTx = result.getResult().getString(0);
-                    Transaction tx = new Transaction(type, Utils.HEX.decode(rawTx));
+                    byte[] txBytes = Utils.HEX.decode(rawTx);
+                    BitTransaction tx = new BitTransaction(type, txBytes);
                     if (!tx.getHash().equals(txHash)) {
                         throw new Exception("Requested TX " + txHash + " but got " + tx.getHashAsString());
                     }
                     listener.onTransactionUpdate(tx);
+                    if (cacheDir != null) {
+                        try {
+                            Files.write(txBytes, getTxCacheFile(txHash));
+                        } catch (IOException e) {
+                            log.warn("Error writing cached transaction", e);
+                        }
+                    }
                 } catch (Exception e) {
                     onFailure(e);
-                    return;
                 }
             }
 
@@ -464,7 +576,38 @@ public class ServerClient implements BlockchainConnection {
     }
 
     @Override
-    public void broadcastTx(final Transaction tx, @Nullable final TransactionEventListener listener) {
+    public void getBlock(final int height, final TransactionEventListener<BitTransaction> listener) {
+        checkNotNull(stratumClient);
+
+        final CallMessage message = new CallMessage("blockchain.block.get_header", height);
+
+        final ListenableFuture<ResultMessage> result = stratumClient.call(message);
+
+        Futures.addCallback(result, new FutureCallback<ResultMessage>() {
+            @Override
+            public void onSuccess(ResultMessage result) {
+                try {
+                    BlockHeader header = parseBlockHeader(type, result.getResult().getJSONObject(0));
+                    listener.onBlockUpdate(header);
+                } catch (JSONException e) {
+                    log.error("Unexpected JSON format", e);
+                }
+            }
+
+            @Override
+            public void onFailure(Throwable t) {
+                if (t instanceof CancellationException) {
+                    log.debug("Canceling {} call", message.getMethod());
+                } else {
+                    log.error("Could not get reply for blockchain.block.get_header", t);
+                }
+            }
+        }, Threading.USER_THREAD);
+    }
+
+    @Override
+    public void broadcastTx(final BitTransaction tx,
+                            @Nullable final TransactionEventListener<BitTransaction> listener) {
         checkNotNull(stratumClient);
 
         CallMessage message = new CallMessage("blockchain.transaction.broadcast",
@@ -497,7 +640,7 @@ public class ServerClient implements BlockchainConnection {
     }
 
     @Override
-    public boolean broadcastTxSync(final Transaction tx) {
+    public boolean broadcastTxSync(final BitTransaction tx) {
         checkNotNull(stratumClient);
 
         CallMessage message = new CallMessage("blockchain.transaction.broadcast",
@@ -518,20 +661,28 @@ public class ServerClient implements BlockchainConnection {
     }
 
     @Override
-    public void ping() {
+    public void ping(@Nullable String versionString) {
         if (!isActivelyConnected()) {
             log.warn("There is no connection with {} server, skipping ping.", type.getName());
             return;
         }
-        final CallMessage pingMsg = new CallMessage("server.version", ImmutableList.of());
+
+        if (versionString == null) {
+            versionString = this.getClass().getCanonicalName();
+        }
+
+        final CallMessage pingMsg = new CallMessage("server.version",
+                ImmutableList.of(versionString, CLIENT_PROTOCOL));
         ListenableFuture<ResultMessage> pong = stratumClient.call(pingMsg);
         Futures.addCallback(pong, new FutureCallback<ResultMessage>() {
             @Override
             public void onSuccess(@Nullable ResultMessage result) {
-                try {
-                    log.info("Server {} version {} OK", type.getName(),
-                            result.getResult().get(0));
-                } catch (JSONException ignore) { }
+                if (log.isDebugEnabled()) {
+                    try {
+                        log.debug("Server {} version {} OK", type.getName(),
+                                checkNotNull(result).getResult().get(0));
+                    } catch (Exception ignore) { }
+                }
             }
 
             @Override
@@ -545,9 +696,15 @@ public class ServerClient implements BlockchainConnection {
         }, Threading.USER_THREAD);
     }
 
+    public void setCacheDir(File cacheDir, int cacheSize) {
+        this.cacheDir = cacheDir;
+        this.cacheSize = cacheSize;
+    }
+
+
     public static class HistoryTx {
-        protected Sha256Hash txHash;
-        protected int height;
+        protected final Sha256Hash txHash;
+        protected final int height;
 
         public HistoryTx(JSONObject json) throws JSONException {
             txHash = new Sha256Hash(json.getString("tx_hash"));
@@ -559,7 +716,7 @@ public class ServerClient implements BlockchainConnection {
             this.height = height;
         }
 
-        public static List<? extends HistoryTx> fromArray(JSONArray jsonArray) throws JSONException {
+        public static List<HistoryTx> historyFromArray(JSONArray jsonArray) throws JSONException {
             ImmutableList.Builder<HistoryTx> list = ImmutableList.builder();
             for (int i = 0; i < jsonArray.length(); i++) {
                 list.add(new HistoryTx(jsonArray.getJSONObject(i)));
@@ -573,6 +730,61 @@ public class ServerClient implements BlockchainConnection {
 
         public int getHeight() {
             return height;
+        }
+    }
+
+    public static class UnspentTx extends HistoryTx {
+        protected final int txPos;
+        protected final long value;
+
+        public UnspentTx(JSONObject json) throws JSONException {
+            super(json);
+            txPos = json.getInt("tx_pos");
+            value = json.getLong("value");
+        }
+
+        public UnspentTx(TransactionOutPoint txop, long value, int height) {
+            super(txop, height);
+            this.txPos = (int) txop.getIndex();
+            this.value = value;
+        }
+
+        public static List<HistoryTx> unspentFromArray(JSONArray jsonArray) throws JSONException {
+            ImmutableList.Builder<HistoryTx> list = ImmutableList.builder();
+            for (int i = 0; i < jsonArray.length(); i++) {
+                list.add(new UnspentTx(jsonArray.getJSONObject(i)));
+            }
+            return list.build();
+        }
+
+        public int getTxPos() {
+            return txPos;
+        }
+
+        public long getValue() {
+            return value;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+
+            UnspentTx unspentTx = (UnspentTx) o;
+
+            if (txPos != unspentTx.txPos) return false;
+            if (value != unspentTx.value) return false;
+            if (!txHash.equals(unspentTx.txHash)) return false;
+
+            return true;
+        }
+
+        @Override
+        public int hashCode() {
+            int result = txHash.hashCode();
+            result = 31 * result + txPos;
+            result = 31 * result + (int) (value ^ (value >>> 32));
+            return result;
         }
     }
 }

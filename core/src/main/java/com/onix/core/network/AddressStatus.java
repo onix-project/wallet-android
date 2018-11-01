@@ -1,12 +1,15 @@
 package com.onix.core.network;
 
-import org.bitcoinj.core.Address;
-import org.bitcoinj.core.Sha256Hash;
-
+import com.onix.core.network.ServerClient.HistoryTx;
+import com.onix.core.network.ServerClient.UnspentTx;
+import com.onix.core.wallet.AbstractAddress;
 import com.google.common.collect.Sets;
+
+import org.bitcoinj.core.Sha256Hash;
 
 import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import javax.annotation.Nullable;
 
@@ -14,18 +17,24 @@ import javax.annotation.Nullable;
  * @author John L. Jegutanis
  */
 final public class AddressStatus {
-    final Address address;
+    final AbstractAddress address;
     @Nullable final String status;
 
-    HashSet<ServerClient.HistoryTx> historyTransactions;
-    HashSet<Sha256Hash> allTransactions = new HashSet<Sha256Hash>();
+    HashSet<HistoryTx> historyTransactions;
+    HashSet<UnspentTx> unspentTransactions;
+    HashSet<Sha256Hash> historyTxHashes = new HashSet<>();
+    HashSet<Sha256Hash> unspentTxHashes = new HashSet<>();
 
-    public AddressStatus(Address address, @Nullable String status) {
+    boolean stateMustBeApplied;
+    boolean historyTxStateApplied;
+    boolean unspentTxStateApplied;
+
+    public AddressStatus(AbstractAddress address, @Nullable String status) {
         this.address = address;
         this.status = status;
     }
 
-    public Address getAddress() {
+    public AbstractAddress getAddress() {
         return address;
     }
 
@@ -35,41 +44,74 @@ final public class AddressStatus {
 
     /**
      * Queue transactions that are going to be fetched
-     * @param txs
      */
-    public void queueHistoryTransactions(List<ServerClient.HistoryTx> txs) {
+    public void queueHistoryTransactions(List<HistoryTx> txs) {
         if (historyTransactions == null) {
-            historyTransactions = (HashSet<ServerClient.HistoryTx>) fillTransactions(txs);
+            historyTransactions = Sets.newHashSet(txs);
+            historyTxHashes = fillTransactions(txs);
+            stateMustBeApplied = true;
         }
-    }
-
-    private HashSet<? extends ServerClient.HistoryTx> fillTransactions(List<? extends ServerClient.HistoryTx> txs) {
-        HashSet<? extends ServerClient.HistoryTx> txSet = Sets.newHashSet(txs);
-        for (ServerClient.HistoryTx tx : txs) {
-            allTransactions.add(tx.getTxHash());
-        }
-        return txSet;
     }
 
     /**
-     * Return true if history and unspent transactions are queued
+     * Queue transactions that are going to be fetched
      */
-    public boolean isReady() {
+    public void queueUnspentTransactions(List<UnspentTx> txs) {
+        if (unspentTransactions == null) {
+            unspentTransactions = Sets.newHashSet(txs);
+            unspentTxHashes = fillTransactions(txs);
+            stateMustBeApplied = true;
+        }
+    }
+
+    private HashSet<Sha256Hash> fillTransactions(Iterable<? extends HistoryTx> txs) {
+        HashSet<Sha256Hash> transactionHashes = new HashSet<>();
+        for (HistoryTx tx : txs) {
+            transactionHashes.add(tx.getTxHash());
+        }
+        return transactionHashes;
+    }
+
+    /**
+     * Return true if history transactions are queued
+     */
+    public boolean isHistoryTxQueued() {
         return historyTransactions != null;
     }
 
     /**
-     * Get all queued transactions
+     * Return true if unspent transactions are queued
      */
-    public HashSet<Sha256Hash> getAllTransactionHashes() {
-        return allTransactions;
+    public boolean isUnspentTxQueued() {
+        return unspentTransactions != null;
+    }
+
+    /**
+     * Get queued history transactions
+     */
+    public Set<Sha256Hash> getHistoryTxHashes() {
+        return historyTxHashes;
+    }
+
+    /**
+     * Get queued unspent transactions
+     */
+    public Set<Sha256Hash> getUnspentTxHashes() {
+        return unspentTxHashes;
     }
 
     /**
      * Get history transactions info
      */
-    public HashSet<ServerClient.HistoryTx> getHistoryTxs() {
+    public HashSet<HistoryTx> getHistoryTxs() {
         return historyTransactions;
+    }
+
+    /**
+     * Get unspent transactions info
+     */
+    public HashSet<UnspentTx> getUnspentTxs() {
+        return unspentTransactions;
     }
 
     @Override
@@ -98,5 +140,25 @@ final public class AddressStatus {
                 "address=" + address +
                 ", status='" + status + '\'' +
                 '}';
+    }
+
+    public boolean isHistoryTxStateApplied() {
+        return historyTxStateApplied;
+    }
+
+    public void setHistoryTxStateApplied(boolean historyTxStateApplied) {
+        this.historyTxStateApplied = historyTxStateApplied;
+    }
+
+    public boolean isUnspentTxStateApplied() {
+        return unspentTxStateApplied;
+    }
+
+    public void setUnspentTxStateApplied(boolean unspentTxStateApplied) {
+        this.unspentTxStateApplied = unspentTxStateApplied;
+    }
+
+    public boolean canCommitStatus() {
+        return !stateMustBeApplied || historyTxStateApplied && unspentTxStateApplied;
     }
 }

@@ -1,15 +1,11 @@
 package com.onix.core.coins;
 
 import com.onix.core.coins.families.ClamsFamily;
-import com.onix.core.messages.MessageFactory;
-import com.onix.core.wallet.families.clams.ClamsTxMessage;
-
-import javax.annotation.Nullable;
 
 /**
  * @author John L. Jegutanis
  */
-public class ClamsMain extends CoinType {
+public class ClamsMain extends ClamsFamily {
     private ClamsMain() {
         id = "clams.main";
 
@@ -18,24 +14,18 @@ public class ClamsMain extends CoinType {
         acceptableAddressCodes = new int[] { addressHeader, p2shHeader };
         spendableCoinbaseDepth = 500;
         transactionVersion = 2;
+        dumpedPrivateKeyHeader = 133;
 
-        family = ClamsFamily.get();
-        name = "Clams (beta)";
+        name = "Clams";
         symbol = "CLAM";
         uriScheme = "clams";
         bip44Index = 23;
         unitExponent = 8;
-        feePerKb = value(10000);
+        feeValue = value(10000);
         minNonDust = value(1);
         softDustLimit = value(1000000);
         softDustPolicy = SoftDustPolicy.AT_LEAST_BASE_FEE_IF_SOFT_DUST_TXO_PRESENT;
         signedMessageHeader = toBytes("Clam Signed Message:\n");
-    }
-
-    @Override
-    @Nullable
-    public MessageFactory getMessagesFactory() {
-        return ClamsTxMessage.getFactory();
     }
 
     private static ClamsMain instance = new ClamsMain();

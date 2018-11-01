@@ -14,10 +14,9 @@
     <TextView
         android:id="@+id/address_row_label"
         style="@style/NormalText"
-        android:layout_width="match_parent"
+        android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        tools:text="Address label"
-        android:gravity="center"/>
+        tools:text="Address label" />
 
     <TextView
         android:id="@+id/address_row_address"

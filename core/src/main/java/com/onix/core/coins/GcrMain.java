@@ -2,7 +2,7 @@ package com.onix.core.coins;
 
 import com.onix.core.coins.families.PeerFamily;
 
-public class GcrMain extends CoinType {
+public class GcrMain extends PeerFamily {
     private GcrMain() {
         id = "gcr.main";
 
@@ -10,14 +10,14 @@ public class GcrMain extends CoinType {
         p2shHeader = 97;
         acceptableAddressCodes = new int[] { addressHeader, p2shHeader };
         spendableCoinbaseDepth = 30;
+        dumpedPrivateKeyHeader = 154;
 
-        family = PeerFamily.get();
-        name = "GCRCoin (beta)";
+        name = "GCRCoin";
         symbol = "GCR";
         uriScheme = "gcr";
         bip44Index = 49;
         unitExponent = 8;
-        feePerKb = value(10000);
+        feeValue = value(10000);
         minNonDust = value(1);
         softDustLimit = value(10000);
         softDustPolicy = SoftDustPolicy.AT_LEAST_BASE_FEE_IF_SOFT_DUST_TXO_PRESENT;

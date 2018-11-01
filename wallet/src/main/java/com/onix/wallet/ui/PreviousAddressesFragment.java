@@ -1,7 +1,7 @@
 package com.onix.wallet.ui;
 
-import android.app.Activity;
 import android.content.ContentResolver;
+import android.content.Context;
 import android.database.ContentObserver;
 import android.os.Bundle;
 import android.os.Handler;
@@ -15,6 +15,7 @@ import android.widget.ListView;
 import android.widget.Toast;
 
 import com.onix.core.coins.CoinType;
+import com.onix.core.wallet.AbstractAddress;
 import com.onix.core.wallet.WalletPocketHD;
 import com.onix.wallet.AddressBookProvider;
 import com.onix.wallet.Constants;
@@ -23,7 +24,6 @@ import com.onix.wallet.WalletApplication;
 import com.onix.wallet.util.ThrottlingWalletChangeListener;
 import com.onix.wallet.util.WeakHandler;
 
-import org.bitcoinj.core.Address;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -117,10 +117,10 @@ public class PreviousAddressesFragment extends Fragment {
                 if (position >= previousAddresses.getHeaderViewsCount()) {
                     Object obj = parent.getItemAtPosition(position);
 
-                    if (obj != null && obj instanceof Address) {
+                    if (obj != null && obj instanceof AbstractAddress) {
                         Bundle args = new Bundle();
                         args.putString(Constants.ARG_ACCOUNT_ID, accountId);
-                        args.putSerializable(Constants.ARG_ADDRESS, (Address)obj);
+                        args.putSerializable(Constants.ARG_ADDRESS, (AbstractAddress) obj);
                         listener.onAddressSelected(args);
                     } else {
                         Toast.makeText(getActivity(), R.string.error_generic, Toast.LENGTH_LONG).show();
@@ -171,14 +171,13 @@ public class PreviousAddressesFragment extends Fragment {
     };
 
     @Override
-    public void onAttach(Activity activity) {
-        super.onAttach(activity);
+    public void onAttach(final Context context) {
+        super.onAttach(context);
         try {
-            listener = (Listener) activity;
-            resolver = activity.getContentResolver();
+            listener = (Listener) context;
+            resolver = context.getContentResolver();
         } catch (ClassCastException e) {
-            throw new ClassCastException(activity.toString()
-                    + " must implement " + PreviousAddressesFragment.Listener.class);
+            throw new ClassCastException(context.toString() + " must implement " + Listener.class);
         }
     }
 
@@ -189,6 +188,6 @@ public class PreviousAddressesFragment extends Fragment {
     }
 
     public interface Listener {
-        public void onAddressSelected(Bundle args);
+        void onAddressSelected(Bundle args);
     }
 }

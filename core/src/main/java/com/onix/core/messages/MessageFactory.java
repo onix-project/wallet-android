@@ -1,6 +1,6 @@
 package com.onix.core.messages;
 
-import org.bitcoinj.core.Transaction;
+import com.onix.core.wallet.AbstractTransaction;
 
 import javax.annotation.Nullable;
 
@@ -16,7 +16,6 @@ public interface MessageFactory {
 
     TxMessage createPublicMessage(String message);
 
-    // TODO change to abstract transaction
     @Nullable
-    TxMessage extractPublicMessage(Transaction transaction);
+    TxMessage extractPublicMessage(AbstractTransaction transaction);
 }

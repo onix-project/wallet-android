@@ -4,22 +4,20 @@ import com.onix.core.coins.CoinType;
 import com.onix.core.coins.Value;
 import com.onix.core.exchange.shapeshift.ShapeShift;
 import com.onix.core.util.ExchangeRate;
+import com.onix.core.wallet.AbstractAddress;
 
-import org.bitcoinj.core.Address;
 import org.json.JSONObject;
 
 import java.util.Date;
-
-import static com.onix.core.Preconditions.checkState;
 
 /**
  * @author John L. Jegutanis
  */
 public class ShapeShiftAmountTx extends ShapeShiftBase {
     public final String pair;
-    public final Address deposit;
+    public final AbstractAddress deposit;
     public final Value depositAmount;
-    public final Address withdrawal;
+    public final AbstractAddress withdrawal;
     public final Value withdrawalAmount;
     public final Date expiration;
     public final ExchangeRate rate;
@@ -33,9 +31,9 @@ public class ShapeShiftAmountTx extends ShapeShiftBase {
                 CoinType[] coinTypePair = ShapeShift.parsePair(pair);
                 CoinType typeDeposit = coinTypePair[0];
                 CoinType typeWithdrawal = coinTypePair[1];
-                deposit = new Address(typeDeposit, innerData.getString("deposit"));
+                deposit = typeDeposit.newAddress(innerData.getString("deposit"));
                 depositAmount = Value.parse(typeDeposit, innerData.getString("depositAmount"));
-                withdrawal = new Address(typeWithdrawal, innerData.getString("withdrawal"));
+                withdrawal = typeWithdrawal.newAddress(innerData.getString("withdrawal"));
                 withdrawalAmount = Value.parse(typeWithdrawal,
                         innerData.getString("withdrawalAmount"));
                 expiration = new Date(innerData.getLong("expiration"));

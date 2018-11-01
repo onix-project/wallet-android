@@ -30,6 +30,12 @@ public class CallMessage extends BaseMessage {
         setParams(Arrays.asList(param));
     }
 
+    public CallMessage(String method, int param) {
+        super();
+        setMethod(method);
+        setParams(Arrays.asList(param));
+    }
+
     public CallMessage(long id, String method, String param) {
         this(method, param);
         setId(id);

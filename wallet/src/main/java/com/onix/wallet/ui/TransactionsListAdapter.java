@@ -18,14 +18,6 @@ package com.onix.wallet.ui;
  */
 
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-
-import javax.annotation.Nonnull;
-
 import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.Color;
@@ -38,21 +30,28 @@ import android.widget.TextView;
 
 import com.onix.core.coins.CoinType;
 import com.onix.core.coins.Value;
-import com.onix.core.messages.MessageFactory;
+import com.onix.core.coins.families.Families;
 import com.onix.core.util.GenericUtils;
+import com.onix.core.wallet.AbstractAddress;
+import com.onix.core.wallet.AbstractTransaction;
 import com.onix.core.wallet.AbstractWallet;
 import com.onix.wallet.AddressBookProvider;
 import com.onix.wallet.R;
 import com.onix.wallet.ui.widget.CurrencyTextView;
 import com.onix.wallet.util.Fonts;
+import com.onix.wallet.util.TimeUtils;
 import com.onix.wallet.util.WalletUtils;
 
-import org.acra.ACRA;
-import org.bitcoinj.core.Address;
-import org.bitcoinj.core.Coin;
-import org.bitcoinj.core.Transaction;
 import org.bitcoinj.core.TransactionConfidence;
 import org.bitcoinj.core.TransactionConfidence.ConfidenceType;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import javax.annotation.Nonnull;
 
 /**
  * @author Andreas Schildbach
@@ -62,7 +61,7 @@ public class TransactionsListAdapter extends BaseAdapter {
     private final LayoutInflater inflater;
     private final AbstractWallet walletPocket;
 
-    private final List<Transaction> transactions = new ArrayList<Transaction>();
+    private final List<AbstractTransaction> transactions = new ArrayList<>();
     private final Resources res;
     private int precision = 0;
     private int shift = 0;
@@ -78,9 +77,10 @@ public class TransactionsListAdapter extends BaseAdapter {
     private final String sentToTitle;
     private final String fontIconSentTo;
     private final String receivedWithTitle;
+    private final String receivedFromTitle;
     private final String fontIconReceivedWith;
 
-    private final Map<String, String> labelCache = new HashMap<String, String>();
+    private final Map<AbstractAddress, String> labelCache = new HashMap<>();
     private final static Object CACHE_NULL_MARKER = "";
 
     private static final String CONFIDENCE_SYMBOL_DEAD = "\u271D"; // latin cross
@@ -88,6 +88,7 @@ public class TransactionsListAdapter extends BaseAdapter {
 
     private static final int VIEW_TYPE_TRANSACTION = 0;
 
+    @Deprecated // TODO change AbstractWallet to WalletAccount
     public TransactionsListAdapter(final Context context, @Nonnull final AbstractWallet walletPocket) {
         this.context = context;
         inflater = LayoutInflater.from(context);
@@ -104,6 +105,7 @@ public class TransactionsListAdapter extends BaseAdapter {
         sentToTitle = res.getString(R.string.sent_to);
         fontIconSentTo = res.getString(R.string.font_icon_send_coins);
         receivedWithTitle = res.getString(R.string.received_with);
+        receivedFromTitle = res.getString(R.string.received_from);
         fontIconReceivedWith = res.getString(R.string.font_icon_receive_coins);
     }
 
@@ -120,14 +122,28 @@ public class TransactionsListAdapter extends BaseAdapter {
         notifyDataSetChanged();
     }
 
+    /*public void replace(@Nonnull final org.bitcoinj.core.Transaction tx) {
+        transactions.clear();
+        transactions.add(new BitTransaction(tx));
+
+        notifyDataSetChanged();
+    }
+
     public void replace(@Nonnull final Transaction tx) {
+        transactions.clear();
+        transactions.add(new NxtTransaction(tx));
+
+        notifyDataSetChanged();
+    }*/
+
+    public void replace(@Nonnull final AbstractTransaction tx) {
         transactions.clear();
         transactions.add(tx);
 
         notifyDataSetChanged();
     }
 
-    public void replace(@Nonnull final Collection<Transaction> transactions) {
+    public void replace(@Nonnull final Collection<AbstractTransaction> transactions) {
         this.transactions.clear();
         this.transactions.addAll(transactions);
 
@@ -147,7 +163,7 @@ public class TransactionsListAdapter extends BaseAdapter {
     }
 
     @Override
-    public Transaction getItem(final int position) {
+    public AbstractTransaction getItem(final int position) {
         if (position == transactions.size())
             return null;
 
@@ -159,7 +175,7 @@ public class TransactionsListAdapter extends BaseAdapter {
         if (position == transactions.size())
             return 0;
 
-        return WalletUtils.longHash(transactions.get(position).getHash());
+        return WalletUtils.longHash(transactions.get(position).getHashBytes());
     }
 
     @Override
@@ -175,7 +191,7 @@ public class TransactionsListAdapter extends BaseAdapter {
             if (row == null)
                 row = inflater.inflate(R.layout.transaction_row, null);
 
-            final Transaction tx = getItem(position);
+            final AbstractTransaction tx = getItem(position);
             bindView(row, tx);
         } else {
             throw new IllegalStateException("unknown type: " + type);
@@ -184,15 +200,13 @@ public class TransactionsListAdapter extends BaseAdapter {
         return row;
     }
 
-    public void bindView(@Nonnull final View row, @Nonnull final Transaction tx) {
+    public void bindView(@Nonnull final View row, @Nonnull final AbstractTransaction tx) {
         Resources res = context.getResources();
-        final TransactionConfidence confidence = tx.getConfidence();
-        final ConfidenceType confidenceType = confidence.getConfidenceType();
-        final boolean isOwn = confidence.getSource().equals(TransactionConfidence.Source.SELF);
-        final boolean isMined = tx.isCoinBase() || tx.isCoinStake();
+        final ConfidenceType confidenceType = tx.getConfidenceType();
+        final boolean isOwn = tx.getSource().equals(TransactionConfidence.Source.SELF);
 //        final boolean isInternal = WalletUtils.isInternal(tx);
 
-        final Coin value = tx.getValue(walletPocket);
+        final Value value = tx.getValue(walletPocket);
         final boolean sent = value.signum() < 0;
 
         final CoinType type = walletPocket.getCoinType();
@@ -206,8 +220,7 @@ public class TransactionsListAdapter extends BaseAdapter {
         Fonts.setTypeface(rowConfirmationsFontIcon, Fonts.Font.COINOMI_FONT_ICONS);
         final TextView rowMessageFontIcon = (TextView) row.findViewById(R.id.transaction_row_message_font_icon);
         Fonts.setTypeface(rowMessageFontIcon, Fonts.Font.COINOMI_FONT_ICONS);
-        // TODO implement date
-//        final TextView rowDate = (TextView) row.findViewById(R.id.transaction_row_time);
+        final TextView rowDate = (TextView) row.findViewById(R.id.transaction_row_time);
         final TextView rowLabel = (TextView) row.findViewById(R.id.transaction_row_label);
         final TextView rowAddress = (TextView) row.findViewById(R.id.transaction_row_address);
         final CurrencyTextView rowValue = (CurrencyTextView) row.findViewById(R.id.transaction_row_value);
@@ -245,10 +258,10 @@ public class TransactionsListAdapter extends BaseAdapter {
         }
 
         // Confirmations
-        if (confidence.getDepthInBlocks() < 4) {
+        if (tx.getDepthInBlocks() < 4) {
             rowConfirmationsFontIcon.setVisibility(View.VISIBLE);
             rowConfirmationsFontIcon.setTextColor(colorLessSignificant);
-            switch (confidence.getDepthInBlocks()) {
+            switch (tx.getDepthInBlocks()) {
                 case 0: // No confirmations
                     rowConfirmationsFontIcon.setText(res.getString(R.string.font_icon_progress_empty));
                     rowConfirmationsFontIcon.setTextColor(colorInsignificant); // PENDING
@@ -268,41 +281,49 @@ public class TransactionsListAdapter extends BaseAdapter {
         }
 
         // Money direction and icon
-        if (isMined) {
+        if (tx.isGenerated()) {
             rowDirectionText.setText(minedTitle);
             rowDirectionFontIcon.setText(fontIconMined);
         } else {
             if (value.isNegative()) {
                 rowDirectionText.setText(sentToTitle);
                 rowDirectionFontIcon.setText(fontIconSentTo);
-            } else {
+            } else if (walletPocket.getCoinType().getFamily() != Families.NXT) {
                 rowDirectionText.setText(receivedWithTitle);
+                rowDirectionFontIcon.setText(fontIconReceivedWith);
+            } else {
+                rowDirectionText.setText(receivedFromTitle);
                 rowDirectionFontIcon.setText(fontIconReceivedWith);
             }
         }
 
         // date
-//        final Date time = tx.getUpdateTime();
-//        rowDate.setText(time != null ? (DateUtils.getRelativeTimeSpanString(context, time.getTime())) : null);
+        final long time = tx.getTimestamp();
+        if (time > 0) {
+            rowDate.setText(TimeUtils.toRelativeTimeString(time));
+            rowDate.setVisibility(View.VISIBLE);
+        } else {
+            rowDate.setVisibility(View.GONE);
+        }
 
         // address - label
-        final Address address;
+        final AbstractAddress address;
         final String label;
 
         if (sent) {
             // we send payment to those addresses
-            List<Address> sentTo = WalletUtils.getSendToAddress(tx, walletPocket);
+            List<AbstractAddress> sentTo = WalletUtils.getSendToAddress(tx, walletPocket);
             // For now show only the first address
             address = sentTo.size() == 0 ? null : sentTo.get(0);
         } else {
             // received with those addresses
-            List<Address> receivedWith = WalletUtils.getReceivedWithAddress(tx, walletPocket);
+            List<AbstractAddress> receivedWith = WalletUtils.getReceivedWithOrFrom(tx, walletPocket);
             // Should be one
             address = receivedWith.size() == 0 ? null : receivedWith.get(0);
         }
 
         if (address != null) {
-            label = resolveLabel(address.toString());
+            label = resolveLabel(address);
         } else {
             if (sent) {
                 // If no address found, assume it is an internal transfer
@@ -315,13 +336,13 @@ public class TransactionsListAdapter extends BaseAdapter {
         if (label != null) {
             rowLabel.setText(label);
             if (address != null) {
-                rowAddress.setText(GenericUtils.addressSplitToGroups(address.toString()));
+                rowAddress.setText(GenericUtils.addressSplitToGroups(address));
                 rowAddress.setVisibility(View.VISIBLE);
             } else {
                 rowAddress.setVisibility(View.GONE);
             }
         } else if (address != null) {
-            rowLabel.setText(GenericUtils.addressSplitToGroups(address.toString()));
+            rowLabel.setText(GenericUtils.addressSplitToGroups(address));
             rowAddress.setVisibility(View.GONE);
         } else {
             rowLabel.setText("???"); // should not happen
@@ -331,11 +352,11 @@ public class TransactionsListAdapter extends BaseAdapter {
 
         // value
         rowValue.setAlwaysSigned(true);
-        rowValue.setAmount(Value.valueOf(type, value));
+        rowValue.setAmount(value);
 
         // Show message label
         if (type.canHandleMessages()) {
-            MessageFactory factory = type.getMessagesFactory();
+            /*MessageFactory factory = type.getMessagesFactory();
             try {
                 // TODO not efficient, should parse the message and save it to a database
                 if (factory != null && factory.extractPublicMessage(tx) != null) {
@@ -346,16 +367,22 @@ public class TransactionsListAdapter extends BaseAdapter {
             } catch (Exception e) {
                 rowMessageFontIcon.setVisibility(View.GONE);
                 ACRA.getErrorReporter().handleSilentException(e);
+            }*/
+            if (tx.getMessage() == null) {
+                rowMessageFontIcon.setVisibility(View.GONE);
+            }
+            else {
+                rowMessageFontIcon.setVisibility(View.VISIBLE);
             }
         } else {
             rowMessageFontIcon.setVisibility(View.GONE);
         }
     }
 
-    private String resolveLabel(@Nonnull final String address) {
+    private String resolveLabel(@Nonnull final AbstractAddress address) {
         final String cachedLabel = labelCache.get(address);
         if (cachedLabel == null) {
-            final String label = AddressBookProvider.resolveLabel(context, walletPocket.getCoinType(), address);
+            final String label = AddressBookProvider.resolveLabel(context, address);
             if (label != null) {
                 labelCache.put(address, label);
             } else {

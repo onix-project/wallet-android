@@ -5,7 +5,7 @@ import com.onix.core.coins.families.BitFamily;
 /**
  * @author John L. Jegutanis
  */
-public class LitecoinMain extends CoinType {
+public class LitecoinMain extends BitFamily {
     private LitecoinMain() {
         id = "litecoin.main";
 
@@ -15,13 +15,12 @@ public class LitecoinMain extends CoinType {
         spendableCoinbaseDepth = 100;
         dumpedPrivateKeyHeader = 176;
 
-        family = BitFamily.get();
         name = "Litecoin";
         symbol = "LTC";
         uriScheme = "litecoin";
         bip44Index = 2;
         unitExponent = 8;
-        feePerKb = value(100000);
+        feeValue = value(100000);
         minNonDust = value(1000); // 0.00001 LTC mininput
         softDustLimit = value(100000); // 0.001 LTC
         softDustPolicy = SoftDustPolicy.BASE_FEE_FOR_EACH_SOFT_DUST_TXO;
@@ -29,7 +28,7 @@ public class LitecoinMain extends CoinType {
     }
 
     private static LitecoinMain instance = new LitecoinMain();
-    public static synchronized LitecoinMain get() {
+    public static synchronized CoinType get() {
         return instance;
     }
 }
