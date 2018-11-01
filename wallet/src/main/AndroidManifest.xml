@@ -217,8 +217,28 @@
         <activity
             android:name="com.onix.wallet.ui.AccountDetailsActivity"
             android:label="@string/title_activity_account_details"
-            android:screenOrientation="portrait"
             android:theme="@style/AppTheme" >
+        </activity>
+        <activity
+            android:name="com.onix.wallet.ui.SweepWalletActivity"
+            android:label="@string/title_activity_sweep_wallet"
+            android:theme="@style/AppTheme" >
+        </activity>
+        <activity
+            android:name="com.onix.wallet.ui.FeesSettingsActivity"
+            android:label="@string/title_activity_transaction_fees"
+            android:theme="@style/AppTheme" >
+            <meta-data
+                android:name="android.support.PARENT_ACTIVITY"
+                android:value="com.onix.wallet.ui.SettingsActivity" />
+        </activity>
+        <activity
+            android:name="com.onix.wallet.ui.DebuggingActivity"
+            android:label="@string/title_activity_debugging"
+            android:theme="@style/AppTheme" >
+            <meta-data
+                android:name="android.support.PARENT_ACTIVITY"
+                android:value="com.onix.wallet.ui.SettingsActivity" />
         </activity>
 
         <provider
