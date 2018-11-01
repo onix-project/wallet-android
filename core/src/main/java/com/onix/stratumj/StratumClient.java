@@ -141,7 +141,7 @@ public class StratumClient extends AbstractExecutionThreadService {
         }
         try {
             socket = createSocket();
-            log.debug("Creating I/O streams to socket: {}", socket);
+            log.info("Creating I/O streams to socket: {}", socket);
             toServer = new DataOutputStream(socket.getOutputStream());
             fromServer = new BufferedReader(new InputStreamReader(socket.getInputStream()));
         } catch (Exception e) {
@@ -255,7 +255,7 @@ public class StratumClient extends AbstractExecutionThreadService {
         try {
             toServer.writeBytes(message.toString());
             callers.put(message.getId(), future);
-        } catch (Exception e) {
+        } catch (Throwable e) {
             future.setException(e);
             log.error("Error making a call to the server: {}", e.getMessage());
             triggerShutdown();
