@@ -1,14 +1,16 @@
 package com.onix.wallet.util;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.os.Build;
 import android.support.v4.app.FragmentManager;
 import android.support.v4.app.ShareCompat;
-import android.support.v7.app.ActionBarActivity;
+import android.support.v7.app.AppCompatActivity;
 import android.support.v7.view.ActionMode;
 import android.view.Menu;
 import android.view.MenuItem;
@@ -18,13 +20,17 @@ import android.widget.Toast;
 import com.onix.core.uri.CoinURI;
 import com.onix.core.uri.CoinURIParseException;
 import com.onix.core.util.GenericUtils;
+import com.onix.core.wallet.AbstractAddress;
+import com.onix.core.wallet.Wallet;
 import com.onix.core.wallet.WalletAccount;
 import com.onix.wallet.AddressBookProvider;
+import com.onix.wallet.Constants;
 import com.onix.wallet.R;
+import com.onix.wallet.ui.AccountDetailsActivity;
+import com.onix.wallet.ui.EditAccountFragment;
 import com.onix.wallet.ui.EditAddressBookEntryFragment;
 
 import org.acra.ACRA;
-import org.bitcoinj.core.Address;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -34,6 +40,10 @@ import org.slf4j.LoggerFactory;
 public class UiUtils {
     private static final Logger log = LoggerFactory.getLogger(UiUtils.class);
 
+    static public void toastGenericError(Context context) {
+        Toast.makeText(context, R.string.error_generic, Toast.LENGTH_LONG).show();
+    }
+
     static public void replyAddressRequest(Activity activity, CoinURI uri, WalletAccount pocket) throws CoinURIParseException {
         try {
             String uriString = uri.getAddressRequestUriResponse(pocket.getReceiveAddress()).toString();
@@ -42,7 +52,7 @@ public class UiUtils {
         } catch (Exception e) {
             // Should not happen
             ACRA.getErrorReporter().handleSilentException(e);
-            Toast.makeText(activity, R.string.error_generic, Toast.LENGTH_SHORT).show();
+            Toast.makeText(activity, R.string.error_generic, Toast.LENGTH_LONG).show();
         }
     }
 
@@ -71,7 +81,7 @@ public class UiUtils {
         } catch (Exception e) {
             // Should not normally happen
             ACRA.getErrorReporter().handleSilentException(e);
-            Toast.makeText(context, R.string.error_generic, Toast.LENGTH_SHORT).show();
+            Toast.makeText(context, R.string.error_generic, Toast.LENGTH_LONG).show();
         }
     }
 
@@ -92,14 +102,14 @@ public class UiUtils {
     }
 
     public static ActionMode startActionMode(final Activity activity, final ActionMode.Callback callback) {
-        if (activity == null || !(activity instanceof ActionBarActivity)) {
-            log.warn("To show action mode, your activity must extend " + ActionBarActivity.class);
+        if (activity == null || !(activity instanceof AppCompatActivity)) {
+            log.warn("To show action mode, your activity must extend " + AppCompatActivity.class);
             return null;
         }
-        return ((ActionBarActivity) activity).startSupportActionMode(callback);
+        return ((AppCompatActivity) activity).startSupportActionMode(callback);
     }
 
-    public static ActionMode startAddressActionMode(final Address address,
+    public static ActionMode startAddressActionMode(final AbstractAddress address,
                                                     final Activity activity,
                                                     final FragmentManager fragmentManager) {
         return startActionMode(activity,
@@ -112,14 +122,20 @@ public class UiUtils {
                 new CopyShareActionModeCallback(string, activity));
     }
 
+    public static ActionMode startAccountActionMode(final WalletAccount account,
+                                                    final Activity activity,
+                                                    final FragmentManager fragmentManager) {
+        return startActionMode(activity,
+                new AccountActionModeCallback(account, activity, fragmentManager));
+    }
 
     public static class AddressActionModeCallback implements ActionMode.Callback {
-        private final Address address;
+        private final AbstractAddress address;
         private final Context context;
         private final FragmentManager fragmentManager;
 
 
-        public AddressActionModeCallback(final Address address,
+        public AddressActionModeCallback(final AbstractAddress address,
                                          final Context context,
                                          final FragmentManager fragmentManager) {
             this.address = address;
@@ -127,22 +143,20 @@ public class UiUtils {
             this.fragmentManager = fragmentManager;
         }
 
-        public Address getAddress() {
+        public AbstractAddress getAddress() {
             return address;
         }
 
         @Override
         public boolean onCreateActionMode(ActionMode mode, Menu menu) {
             mode.getMenuInflater().inflate(R.menu.address_options, menu);
-            return true;
-        }
-
-        @Override
-        public boolean onPrepareActionMode(ActionMode mode, Menu menu) {
             final String label = AddressBookProvider.resolveLabel(context, address);
             mode.setTitle(label != null ? label : GenericUtils.addressSplitToGroups(address));
             return true;
         }
+
+        @Override
+        public boolean onPrepareActionMode(ActionMode mode, Menu menu) { return false; }
 
         @Override
         public boolean onActionItemClicked(ActionMode mode, MenuItem menuItem) {
@@ -152,7 +166,7 @@ public class UiUtils {
                     mode.finish();
                     return true;
                 case R.id.action_copy:
-                    UiUtils.copy(context, address.toString());
+                    UiUtils.copy(context, CoinURI.convertToCoinURI(address));
                     mode.finish();
                     return true;
             }
@@ -193,6 +207,70 @@ public class UiUtils {
                     return true;
                 case R.id.action_copy:
                     UiUtils.copy(activity, string);
+                    mode.finish();
+                    return true;
+            }
+
+            return false;
+        }
+
+        @Override public void onDestroyActionMode(ActionMode actionMode) { }
+    }
+
+    public static class AccountActionModeCallback implements ActionMode.Callback {
+        private final WalletAccount account;
+        private final Activity activity;
+        private final FragmentManager fragmentManager;
+
+        public AccountActionModeCallback(final WalletAccount account,
+                                         final Activity activity,
+                                         final FragmentManager fragmentManager) {
+            this.account = account;
+            this.activity = activity;
+            this.fragmentManager = fragmentManager;
+        }
+
+        @Override
+        public boolean onCreateActionMode(ActionMode mode, Menu menu) {
+            mode.getMenuInflater().inflate(R.menu.account_options, menu);
+            mode.setTitle(account.getDescriptionOrCoinName());
+            return true;
+        }
+
+        @Override
+        public boolean onPrepareActionMode(ActionMode mode, Menu menu) { return false; }
+
+        @Override
+        public boolean onActionItemClicked(ActionMode mode, MenuItem menuItem) {
+            switch (menuItem.getItemId()) {
+                case R.id.action_edit_description:
+                    EditAccountFragment.edit(fragmentManager, account);
+                    mode.finish();
+                    return true;
+                case R.id.action_account_details:
+                    Intent intent = new Intent(activity, AccountDetailsActivity.class);
+                    intent.putExtra(Constants.ARG_ACCOUNT_ID, account.getId());
+                    activity.startActivity(intent);
+                    mode.finish();
+                    return true;
+                case R.id.action_delete:
+                    new AlertDialog.Builder(activity)
+                            .setTitle(activity.getString(R.string.edit_account_delete_title,
+                                    account.getDescriptionOrCoinName()))
+                            .setMessage(R.string.edit_account_delete_description)
+                            .setNegativeButton(R.string.button_cancel, null)
+                            .setPositiveButton(R.string.button_ok, new DialogInterface.OnClickListener() {
+                                @Override
+                                public void onClick(DialogInterface dialog, int which) {
+                                    Wallet wallet = account.getWallet();
+                                    wallet.deleteAccount(account.getId());
+                                    if (activity instanceof EditAccountFragment.Listener) {
+                                        ((EditAccountFragment.Listener) activity)
+                                                .onAccountModified(account);
+                                    }
+                                }
+                            })
+                            .create().show();
                     mode.finish();
                     return true;
             }
