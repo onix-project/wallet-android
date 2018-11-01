@@ -1,22 +1,38 @@
 package com.onix.core.wallet;
 
 import com.onix.core.coins.CoinType;
+import com.onix.core.coins.ValueType;
+import com.onix.core.util.TypeUtils;
+
+import org.bitcoinj.utils.Threading;
+
+import java.util.concurrent.locks.ReentrantLock;
+
+import javax.annotation.Nullable;
 
 /**
  * @author John L. Jegutanis
  */
-public abstract class AbstractWallet extends TransactionWatcherWallet {
+public abstract class AbstractWallet<T extends AbstractTransaction, A extends AbstractAddress>
+        implements WalletAccount<T, A> {
     protected final String id;
-    private String description;
+    protected String description;
+    protected final CoinType type;
+    protected final ReentrantLock lock = Threading.lock("AbstractWallet");
 
     public AbstractWallet(CoinType coinType, String id) {
-        super(coinType);
+        this.type = coinType;
         this.id = id;
     }
 
     @Override
     public String getId() {
         return id;
+    }
+
+    @Override
+    public CoinType getCoinType() {
+        return type;
     }
 
     /**
@@ -35,7 +51,63 @@ public abstract class AbstractWallet extends TransactionWatcherWallet {
      * Get the description of the wallet. See {@link WalletPocketHD#setDescription(String))}
      */
     @Override
+    @Nullable
     public String getDescription() {
         return description;
+    }
+
+    /**
+     * Get the description or the coin type of the wallet.
+     */
+    @Override
+    public String getDescriptionOrCoinName() {
+        if (description == null || description.trim().isEmpty()) {
+            return type.getName();
+        } else {
+            return description;
+        }
+    }
+
+    @Override
+    public void completeAndSignTx(SendRequest request) throws WalletAccountException {
+        if (request.isCompleted()) {
+            signTransaction(request);
+        } else {
+            completeTransaction(request);
+        }
+    }
+
+    @Override
+    public boolean isType(WalletAccount other) {
+        return TypeUtils.is(type, other);
+    }
+
+    @Override
+    public boolean isType(ValueType otherType) {
+        return TypeUtils.is(type, otherType);
+    }
+
+    @Override
+    public boolean isType(AbstractAddress address) {
+        return TypeUtils.is(type, address);
+    }
+
+    public WalletConnectivityStatus getConnectivityStatus() {
+        if (!isConnected()) {
+            return WalletConnectivityStatus.DISCONNECTED;
+        } else {
+            if (isLoading()) {
+                return WalletConnectivityStatus.LOADING;
+            } else {
+                return WalletConnectivityStatus.CONNECTED;
+            }
+        }
+    }
+
+    @Override
+    public boolean equals(WalletAccount other) {
+        return other != null &&
+                getId().equals(other.getId()) &&
+                getCoinType().equals(other.getCoinType());
     }
 }

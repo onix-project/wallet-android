@@ -18,21 +18,17 @@ package com.onix.core.wallet;
 
 
 import com.onix.core.coins.CoinType;
-import org.bitcoinj.core.Address;
-import org.bitcoinj.core.Coin;
-import org.bitcoinj.core.Transaction;
-import org.bitcoinj.core.Wallet.MissingSigsMode;
-import org.bitcoinj.wallet.CoinSelector;
-
+import com.onix.core.coins.Value;
 import com.onix.core.messages.TxMessage;
+import com.onix.core.wallet.families.bitcoin.CoinSelector;
 import com.google.common.base.Objects;
 import com.google.common.base.Objects.ToStringHelper;
 
+import org.bitcoinj.core.Transaction;
+import org.bitcoinj.core.Wallet.MissingSigsMode;
 import org.spongycastle.crypto.params.KeyParameter;
 
 import java.io.Serializable;
-
-import static com.google.common.base.Preconditions.checkNotNull;
 
 /**
  * A SendRequest gives the wallet information about precisely how to send money to a recipient or set of recipients.
@@ -40,7 +36,7 @@ import static com.google.common.base.Preconditions.checkNotNull;
  * just simplify the most common use cases. You may wish to customize a SendRequest if you want to attach a fee or
  * modify the change address.
  */
-public class SendRequest implements Serializable{
+public class SendRequest<T extends AbstractTransaction> implements Serializable {
 
     /**
      * The blockchain network (Bitcoin, Dogecoin,..) that this request is going to transact
@@ -51,17 +47,8 @@ public class SendRequest implements Serializable{
      * <p>A transaction, probably incomplete, that describes the outline of what you want to do. This typically will
      * mean it has some outputs to the intended destinations, but no inputs or change address (and therefore no
      * fees) - the wallet will calculate all that for you and update tx later.</p>
-     *
-     * <p>Be careful when adding outputs that you check the min output value
-     * ({@link org.bitcoinj.core.TransactionOutput#getMinNonDustValue(Coin)}) to avoid the whole transaction being rejected
-     * because one output is dust.</p>
-     *
-     * <p>If there are already inputs to the transaction, make sure their out point has a connected output,
-     * otherwise their value will be added to fee.  Also ensure they are either signed or are spendable by a wallet
-     * key, otherwise the behavior of {@link WalletPocketHD#completeTx(SendRequest)} is undefined (likely
-     * RuntimeException).</p>
      */
-    public Transaction tx;
+    public T tx;
 
     /**
      * When emptyWallet is set, all coins selected by the coin selector are sent to the first output in tx
@@ -75,7 +62,7 @@ public class SendRequest implements Serializable{
      * don't really control as it depends on who sent you money), and the value being sent somewhere else. The
      * change address should be selected from this wallet, normally. <b>If null this will be chosen for you.</b>
      */
-    public Address changeAddress = null;
+    public AbstractAddress changeAddress = null;
 
     /**
      * <p>A transaction can have a fee attached, which is defined as the difference between the input values
@@ -88,10 +75,10 @@ public class SendRequest implements Serializable{
      * at least {@link Transaction#REFERENCE_DEFAULT_MIN_TX_FEE} if it is set, as default reference clients will
      * otherwise simply treat the transaction as if there were no fee at all.</p>
      *
-     * <p>You might also consider adding a {@link SendRequest#feePerKb} to set the fee per kb of transaction size
+     * <p>You might also consider adding a {@link SendRequest#feePerTxSize} to set the fee per kb of transaction size
      * (rounded down to the nearest kb) as that is how transactions are sorted when added to a block by miners.</p>
      */
-    public Coin fee = null;
+    public Value fee;
 
     /**
      * <p>A transaction can have a fee attached, which is defined as the difference between the input values
@@ -107,7 +94,7 @@ public class SendRequest implements Serializable{
      *
      * <p>You might also consider using a {@link SendRequest#fee} to set the fee added for the first kb of size.</p>
      */
-    public Coin feePerKb;
+    public Value feePerTxSize;
 
     /**
      * <p>Requires that there be enough fee for a default reference client to at least relay the transaction.
@@ -115,7 +102,7 @@ public class SendRequest implements Serializable{
      * only set this to false if you know what you're doing.</p>
      *
      * <p>Note that this does not enforce certain fee rules that only apply to transactions which are larger than
-     * 26,000 bytes. If you get a transaction which is that large, you should set a fee and feePerKb of at least
+     * 26,000 bytes. If you get a transaction which is that large, you should set a fee and feeValue of at least
      * {@link Transaction#REFERENCE_DEFAULT_MIN_TX_FEE}.</p>
      */
     public boolean ensureMinRequiredFee = true;
@@ -123,7 +110,17 @@ public class SendRequest implements Serializable{
     /**
      * If true (the default), the inputs will be signed.
      */
-    public boolean signInputs = true;
+    public boolean signTransaction = true;
+
+    /**
+     * If true, the wallet will use unconfirmed received coins (that could be double spent)
+     */
+    public boolean useUnsafeOutputs = false;
+
+    /**
+     * If true, the wallet will use mined funds coins are not sufficiently confirmed
+     */
+    public boolean useImmatureCoinbases = false;
 
     /**
      * The AES key to use to decrypt the private keys before signing.
@@ -153,6 +150,14 @@ public class SendRequest implements Serializable{
      */
     transient public MissingSigsMode missingSigsMode = MissingSigsMode.THROW;
 
+    public boolean isCompleted() {
+        return completed;
+    }
+
+    public void setCompleted(boolean completed) {
+        this.completed = completed;
+    }
+
     /**
      * Attaches a message to the transaction. There is no guarantee that the coin supports messages
      * or that the recipient will ultimately get them or if the message will be recorded to on the
@@ -160,36 +165,23 @@ public class SendRequest implements Serializable{
      */
     public TxMessage txMessage;
 
-    // Tracks if this has been passed to wallet.completeTx already: just a safety check.
-    boolean completed;
+    // Tracks if this has been passed to wallet.completeTransaction already: just a safety check.
+    private boolean completed;
 
-    private SendRequest() {}
-
-    /**
-     * <p>Creates a new SendRequest to the given address for the given value.</p>
-     *
-     * <p>Be very careful when value is smaller than {@link Transaction#MIN_NONDUST_OUTPUT} as the transaction will
-     * likely be rejected by the network in this case.</p>
-     */
-    public static SendRequest to(Address destination, Coin value) {
-        SendRequest req = new SendRequest();
-        checkNotNull(destination.getParameters(), "Address is for an unknown network");
-        req.type = (CoinType) destination.getParameters();
-        req.feePerKb = req.type.getFeePerKb();
-        req.tx = new Transaction(req.type);
-        req.tx.addOutput(value, destination);
-        return req;
-    }
-
-    public static SendRequest emptyWallet(Address destination) {
-        SendRequest req = new SendRequest();
-        checkNotNull(destination.getParameters(), "Address is for an unknown network");
-        req.type = (CoinType) destination.getParameters();
-        req.feePerKb = req.type.getFeePerKb();
-        req.tx = new Transaction(req.type);
-        req.tx.addOutput(Coin.ZERO, destination);
-        req.emptyWallet = true;
-        return req;
+    protected SendRequest(CoinType type) {
+        this.type = type;
+        switch (type.getFeePolicy()) {
+            case FLAT_FEE:
+                feePerTxSize = type.value(0);
+                fee = type.getFeeValue();
+                break;
+            case FEE_PER_KB:
+                feePerTxSize = type.getFeeValue();
+                fee = type.value(0);
+                break;
+            default:
+                throw new RuntimeException("Unknown fee policy: " + type.getFeePolicy());
+        }
     }
 
     @Override
@@ -199,9 +191,9 @@ public class SendRequest implements Serializable{
         helper.add("emptyWallet", emptyWallet);
         helper.add("changeAddress", changeAddress);
         helper.add("fee", fee);
-        helper.add("feePerKb", feePerKb);
+        helper.add("feePerTxSize", feePerTxSize);
         helper.add("ensureMinRequiredFee", ensureMinRequiredFee);
-        helper.add("signInputs", signInputs);
+        helper.add("signTransaction", signTransaction);
         helper.add("aesKey", aesKey != null ? "set" : null); // careful to not leak the key
         helper.add("coinSelector", coinSelector);
         helper.add("shuffleOutputs", shuffleOutputs);
