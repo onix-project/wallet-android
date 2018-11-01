@@ -5,9 +5,12 @@ import com.onix.core.coins.CoinID;
 import com.onix.core.coins.CoinType;
 import com.onix.core.coins.Value;
 import com.onix.core.coins.ValueType;
+import com.onix.core.exceptions.AddressMalformedException;
+import com.onix.core.wallet.AbstractAddress;
+import com.onix.core.wallet.families.bitcoin.BitAddress;
+import com.onix.core.wallet.families.nxt.NxtAddress;
 import com.google.common.collect.ImmutableList;
 
-import org.bitcoinj.core.Address;
 import org.bitcoinj.core.AddressFormatException;
 import org.bitcoinj.core.Monetary;
 import org.bitcoinj.core.VersionedChecksummedBytes;
@@ -27,55 +30,84 @@ public class GenericUtils {
     private static final Pattern characterIl = Pattern.compile("[Il]");
     private static final Pattern notBase58 = Pattern.compile("[^123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz]");
 
+    // FIXME handle NXT addresses
     public static String fixAddress(final String input) {
-        String fixed = charactersO0.matcher(input).replaceAll("o");
-        fixed = characterIl.matcher(fixed).replaceAll("1");
-        fixed = notBase58.matcher(fixed).replaceAll("");
-        return fixed;
+//        String fixed = charactersO0.matcher(input).replaceAll("o");
+//        fixed = characterIl.matcher(fixed).replaceAll("1");
+//        fixed = notBase58.matcher(fixed).replaceAll("");
+//        return fixed;
+        return input;
     }
 
-    public static String addressSplitToGroupsMultiline(final String address) {
+    public static String addressSplitToGroupsMultiline(final AbstractAddress address) {
+        if (address instanceof NxtAddress) {
+            return addressSplitToGroupsMultiline((NxtAddress) address);
+        } else if (address instanceof BitAddress) {
+            return addressSplitToGroupsMultiline((BitAddress) address);
+        } else {
+            throw new RuntimeException("Unsupported address: " + address.getClass());
+        }
+    }
+
+    public static String addressSplitToGroupsMultiline(final NxtAddress address) {
+        // Nxt addresses are short, so no need to split them in multiple lines
+        return addressSplitToGroups(address);
+    }
+
+    public static String addressSplitToGroupsMultiline(final BitAddress address) {
+        String addressStr = address.toString();
         StringBuilder sb = new StringBuilder();
-        sb.append(address.substring(0, 4));
+        sb.append(addressStr.substring(0, 4));
         sb.append(" ");
-        sb.append(address.substring(4, 8));
+        sb.append(addressStr.substring(4, 8));
         sb.append(" ");
-        sb.append(address.substring(8, 12));
+        sb.append(addressStr.substring(8, 12));
         sb.append(" ");
-        sb.append(address.substring(12, 17));
+        sb.append(addressStr.substring(12, 17));
         sb.append("\n");
-        sb.append(address.substring(17, 21));
+        sb.append(addressStr.substring(17, 21));
         sb.append(" ");
-        sb.append(address.substring(21, 25));
+        sb.append(addressStr.substring(21, 25));
         sb.append(" ");
-        sb.append(address.substring(25, 29));
+        sb.append(addressStr.substring(25, 29));
         sb.append(" ");
-        sb.append(address.substring(29));
+        sb.append(addressStr.substring(29));
 
         return sb.toString();
     }
 
-    public static String addressSplitToGroups(final Address address) {
-        return addressSplitToGroups(address.toString());
+    public static String addressSplitToGroups(final AbstractAddress address) {
+        if (address instanceof NxtAddress) {
+            return addressSplitToGroups((NxtAddress) address);
+        } else if (address instanceof BitAddress) {
+            return addressSplitToGroups((BitAddress) address);
+        } else {
+            throw new RuntimeException("Unsupported address: " + address.getClass());
+        }
     }
 
-    public static String addressSplitToGroups(final String address) {
+    public static String addressSplitToGroups(final NxtAddress address) {
+        return address.toString(); // already split in groups
+    }
+
+    public static String addressSplitToGroups(final BitAddress address) {
+        String addressStr = address.toString();
         StringBuilder sb = new StringBuilder();
-        sb.append(address.substring(0, 5));
+        sb.append(addressStr.substring(0, 5));
         sb.append(" ");
-        sb.append(address.substring(5, 9));
+        sb.append(addressStr.substring(5, 9));
         sb.append(" ");
-        sb.append(address.substring(9, 13));
+        sb.append(addressStr.substring(9, 13));
         sb.append(" ");
-        sb.append(address.substring(13, 17));
+        sb.append(addressStr.substring(13, 17));
         sb.append(" ");
-        sb.append(address.substring(17, 21));
+        sb.append(addressStr.substring(17, 21));
         sb.append(" ");
-        sb.append(address.substring(21, 25));
+        sb.append(addressStr.substring(21, 25));
         sb.append(" ");
-        sb.append(address.substring(25, 29));
+        sb.append(addressStr.substring(25, 29));
         sb.append(" ");
-        sb.append(address.substring(29));
+        sb.append(addressStr.substring(29));
 
         return sb.toString();
     }
@@ -190,11 +222,30 @@ public class GenericUtils {
      * Parses the provided string and returns the possible supported coin types.
      * Throws an AddressFormatException if the string is not a valid address or not supported.
      */
-    public static List<CoinType> getPossibleTypes(String addressStr) throws AddressFormatException {
-        VersionedChecksummedBytes parsed = new VersionedChecksummedBytes(addressStr) { };
+    public static List<CoinType> getPossibleTypes(String addressStr) throws AddressMalformedException {
         ImmutableList.Builder<CoinType> builder = ImmutableList.builder();
+        tryBitcoinFamilyAddresses(addressStr, builder);
+        // TODO try other coin addresses
+        List<CoinType> possibleTypes = builder.build();
+        if (possibleTypes.size() == 0) {
+            throw new AddressMalformedException("Unsupported address: " + addressStr);
+        }
+        return possibleTypes;
+    }
+
+    /**
+     * Tries to parse the addressStr as a Bitcoin style address and find potential compatible coin types
+     * @param addressStr possible bitcoin type address
+     * @param builder for the types list
+     */
+    private static void tryBitcoinFamilyAddresses(final String addressStr, ImmutableList.Builder<CoinType> builder) {
+        VersionedChecksummedBytes parsed;
+        try {
+            parsed = new VersionedChecksummedBytes(addressStr) { };
+        } catch (AddressFormatException e) { return; }
         int version = parsed.getVersion();
         for (CoinType type : CoinID.getSupportedCoins()) {
+            if (type.getAcceptableAddressCodes() == null) continue;
             for (int addressCode : type.getAcceptableAddressCodes()) {
                 if (addressCode == version) {
                     builder.add(type);
@@ -202,25 +253,20 @@ public class GenericUtils {
                 }
             }
         }
-        List<CoinType> possibleTypes = builder.build();
-        if (possibleTypes.size() == 0) {
-            throw new AddressFormatException("Unsupported address: " + addressStr);
-        }
-        return builder.build();
     }
 
-    public static List<CoinType> getPossibleTypes(Address address) throws AddressFormatException {
+    public static List<CoinType> getPossibleTypes(AbstractAddress address) throws AddressMalformedException {
         return getPossibleTypes(address.toString());
     }
 
-    public static boolean hasMultipleTypes(Address address) {
+    public static boolean hasMultipleTypes(AbstractAddress address) {
         return hasMultipleTypes(address.toString());
     }
 
     public static boolean hasMultipleTypes(String addressStr) {
         try {
             return getPossibleTypes(addressStr).size() > 1;
-        } catch (AddressFormatException e) {
+        } catch (AddressMalformedException e) {
             return false;
         }
     }
