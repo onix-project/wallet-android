@@ -14,8 +14,7 @@ import com.onix.core.wallet.WalletAccount;
 import com.onix.wallet.Constants;
 import com.onix.wallet.R;
 import com.onix.wallet.WalletApplication;
-import com.onix.wallet.util.LayoutUtils;
-import com.onix.wallet.util.Qr;
+import com.onix.wallet.util.QrUtils;
 import com.onix.wallet.util.UiUtils;
 
 import static com.onix.core.Preconditions.checkNotNull;
@@ -62,9 +61,8 @@ public class AccountDetailsFragment extends Fragment {
         publicKey.setOnClickListener(getPubKeyOnClickListener());
         publicKey.setText(publicKeySerialized);
 
-        int maxQrSize = LayoutUtils.calculateMaxQrCodeSize(getResources());
         ImageView qrView = (ImageView) view.findViewById(R.id.qr_code_public_key);
-        qrView.setImageBitmap(Qr.bitmap(publicKeySerialized, maxQrSize));
+        QrUtils.setQr(qrView, getResources(), publicKeySerialized);
 
         return view;
     }

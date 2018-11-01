@@ -4,6 +4,9 @@ import android.app.Dialog;
 import android.app.ProgressDialog;
 import android.os.Bundle;
 import android.support.v4.app.DialogFragment;
+import android.support.v4.app.FragmentManager;
+
+import javax.annotation.Nullable;
 
 /**
  * @author John L. Jegutanis
@@ -20,9 +23,31 @@ public class Dialogs {
         return newDialog;
     }
 
+    /**
+     * Shows a dialog fragment
+     */
+    public static void showDialog(FragmentManager fm, DialogFragment dialog, String string, String tag) {
+        setMessage(dialog, string).show(fm, tag);
+    }
+
+    /**
+     * Dismiss a dialog fragment
+     * @return true if fragment is detached, useful for halting async task's onPostExecute.
+     */
+    public static boolean dismissAllowingStateLoss(@Nullable FragmentManager fm, String tag) {
+        if (fm == null) {
+            return true;
+        }
+        DialogFragment dialog = (DialogFragment) fm.findFragmentByTag(tag);
+        if (dialog != null) {
+            dialog.dismissAllowingStateLoss();
+        }
+        return false;
+    }
+
     public static class ProgressDialogFragment extends DialogFragment {
-        public static ProgressDialogFragment newInstance(String message) {
-            return (ProgressDialogFragment) setMessage(new ProgressDialogFragment(), message);
+        public static void show(FragmentManager fm, String string, String tag) {
+            showDialog(fm, new ProgressDialogFragment(), string, tag);
         }
 
         @Override

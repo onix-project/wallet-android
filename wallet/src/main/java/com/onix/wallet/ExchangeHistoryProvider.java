@@ -12,10 +12,9 @@ import android.net.Uri;
 import com.onix.core.coins.CoinID;
 import com.onix.core.coins.CoinType;
 import com.onix.core.coins.Value;
+import com.onix.core.exceptions.AddressMalformedException;
 import com.onix.core.exchange.shapeshift.data.ShapeShiftTxStatus;
-
-import org.bitcoinj.core.Address;
-import org.bitcoinj.core.AddressFormatException;
+import com.onix.core.wallet.AbstractAddress;
 
 import java.io.Serializable;
 import java.util.List;
@@ -43,9 +42,9 @@ public class ExchangeHistoryProvider extends ContentProvider {
 
     private Helper helper;
 
-    public static Uri contentUri(@Nonnull final String packageName, @Nonnull final Address deposit) {
+    public static Uri contentUri(@Nonnull final String packageName, @Nonnull final AbstractAddress deposit) {
         return Uri.parse("content://" + packageName + '.' + DATABASE_TABLE).buildUpon()
-                .appendPath(deposit.getParameters().getId()).appendPath(deposit.toString()).build();
+                .appendPath(deposit.getType().getId()).appendPath(deposit.toString()).build();
     }
 
     public static Uri contentUri(@Nonnull final String packageName) {
@@ -57,23 +56,23 @@ public class ExchangeHistoryProvider extends ContentProvider {
         final int status = getStatus(cursor);
 
         CoinType depositType = CoinID.typeFromId(cursor.getString(cursor.getColumnIndexOrThrow(KEY_DEPOSIT_COIN_ID)));
-        Address depositAddress;
+        AbstractAddress depositAddress;
         try {
-            depositAddress = new Address(depositType, cursor.getString(cursor.getColumnIndexOrThrow(KEY_DEPOSIT_ADDRESS)));
-        } catch (AddressFormatException e) {
+            depositAddress = depositType.newAddress(cursor.getString(cursor.getColumnIndexOrThrow(KEY_DEPOSIT_ADDRESS)));
+        } catch (AddressMalformedException e) {
             // Should never happen
             throw new RuntimeException(e);
         }
         Value depositAmount = depositType.value(cursor.getLong(cursor.getColumnIndexOrThrow(KEY_DEPOSIT_AMOUNT_UNIT)));
         String depositTxId = cursor.getString(cursor.getColumnIndexOrThrow(KEY_DEPOSIT_TXID));
 
-        Address withdrawAddress;
+        AbstractAddress withdrawAddress;
         Value withdrawAmount;
         String withdrawTxId;
 
         try {
             CoinType withdrawType = CoinID.typeFromId(cursor.getString(cursor.getColumnIndexOrThrow(KEY_WITHDRAW_COIN_ID)));
-            withdrawAddress = new Address(withdrawType, cursor.getString(cursor.getColumnIndexOrThrow(KEY_WITHDRAW_ADDRESS)));
+            withdrawAddress = withdrawType.newAddress(cursor.getString(cursor.getColumnIndexOrThrow(KEY_WITHDRAW_ADDRESS)));
             withdrawAmount = withdrawType.value(cursor.getLong(cursor.getColumnIndexOrThrow(KEY_WITHDRAW_AMOUNT_UNIT)));
             withdrawTxId = cursor.getString(cursor.getColumnIndexOrThrow(KEY_WITHDRAW_TXID));
         } catch (Exception e) {
@@ -102,12 +101,12 @@ public class ExchangeHistoryProvider extends ContentProvider {
         throw new UnsupportedOperationException();
     }
 
-    private Address getDepositAddress(Uri uri) {
-        Address address;
+    private AbstractAddress getDepositAddress(Uri uri) {
+        AbstractAddress address;
         final List<String> pathSegments = getPathSegments(uri);
         try {
-            address = new Address(CoinID.typeFromId(pathSegments.get(0)), pathSegments.get(1));
-        } catch (AddressFormatException e) {
+            address = CoinID.typeFromId(pathSegments.get(0)).newAddress(pathSegments.get(1));
+        } catch (AddressMalformedException e) {
             throw new IllegalArgumentException(e);
         }
         return address;
@@ -122,9 +121,9 @@ public class ExchangeHistoryProvider extends ContentProvider {
 
     @Override
     public Uri insert(final Uri uri, final ContentValues values) {
-        final Address address = getDepositAddress(uri);
+        final AbstractAddress address = getDepositAddress(uri);
 
-        values.put(KEY_DEPOSIT_COIN_ID, address.getParameters().getId());
+        values.put(KEY_DEPOSIT_COIN_ID, address.getType().getId());
         values.put(KEY_DEPOSIT_ADDRESS, address.toString());
 
         long rowId = helper.getWritableDatabase().insertOrThrow(DATABASE_TABLE, null, values);
@@ -139,14 +138,14 @@ public class ExchangeHistoryProvider extends ContentProvider {
 
     @Override
     public int update(final Uri uri, final ContentValues values, final String selection, final String[] selectionArgs) {
-        final Address address = getDepositAddress(uri);
+        final AbstractAddress address = getDepositAddress(uri);
 
-        values.put(KEY_DEPOSIT_COIN_ID, address.getParameters().getId());
+        values.put(KEY_DEPOSIT_COIN_ID, address.getType().getId());
         values.put(KEY_DEPOSIT_ADDRESS, address.toString());
 
         final int count = helper.getWritableDatabase().update(DATABASE_TABLE, values,
                 KEY_DEPOSIT_COIN_ID + "=? AND " + KEY_DEPOSIT_ADDRESS + "=?",
-                new String[]{address.getParameters().getId(), address.toString()});
+                new String[]{address.getType().getId(), address.toString()});
 
         if (count > 0)
             getContext().getContentResolver().notifyChange(uri, null);
@@ -156,11 +155,11 @@ public class ExchangeHistoryProvider extends ContentProvider {
 
     @Override
     public int delete(final Uri uri, final String selection, final String[] selectionArgs) {
-        final Address address = getDepositAddress(uri);
+        final AbstractAddress address = getDepositAddress(uri);
 
         final int count = helper.getWritableDatabase().delete(DATABASE_TABLE,
                 KEY_DEPOSIT_COIN_ID + "=? AND " + KEY_DEPOSIT_ADDRESS + "=?",
-                new String[]{address.getParameters().getId(), address.toString()});
+                new String[]{address.getType().getId(), address.toString()});
 
         if (count > 0)
             getContext().getContentResolver().notifyChange(uri, null);
@@ -179,9 +178,9 @@ public class ExchangeHistoryProvider extends ContentProvider {
             throw new IllegalArgumentException(uri.toString());
 
         if (pathSegments.size() == 2) {
-            final Address address = getDepositAddress(uri);
+            final AbstractAddress address = getDepositAddress(uri);
             qb.appendWhere(KEY_DEPOSIT_COIN_ID + "=");
-            qb.appendWhereEscapeString(address.getParameters().getId());
+            qb.appendWhereEscapeString(address.getType().getId());
             qb.appendWhere(" AND " + KEY_DEPOSIT_ADDRESS + "=");
             qb.appendWhereEscapeString(address.toString());
         }
@@ -196,7 +195,7 @@ public class ExchangeHistoryProvider extends ContentProvider {
 
     private static class Helper extends SQLiteOpenHelper {
         private static final String DATABASE_NAME = "exchange_history";
-        private static final int DATABASE_VERSION = 1;
+        private static final int DATABASE_VERSION = 2;
 
         private static final String DATABASE_CREATE = "CREATE TABLE " + DATABASE_TABLE + " ("
                 + KEY_ROWID + " INTEGER PRIMARY KEY AUTOINCREMENT, "
@@ -234,10 +233,17 @@ public class ExchangeHistoryProvider extends ContentProvider {
 
         private void upgrade(final SQLiteDatabase db, final int oldVersion) {
             if (oldVersion == 1) {
-                // future
+                db.execSQL(renameCoinId(KEY_DEPOSIT_COIN_ID, "darkcoin.main", "dash.main"));
+                db.execSQL(renameCoinId(KEY_WITHDRAW_COIN_ID, "darkcoin.main", "dash.main"));
             } else {
                 throw new UnsupportedOperationException("old=" + oldVersion);
             }
+        }
+
+        private String renameCoinId(String fieldName, String from, String to) {
+            return "UPDATE " + DATABASE_TABLE + " SET " + fieldName +
+                    " = replace(" + fieldName + ", \"" + from + "\", \"" + to + "\") " +
+                    "WHERE " + fieldName + " == \"" + from + "\"";
         }
     }
 
@@ -249,16 +255,16 @@ public class ExchangeHistoryProvider extends ContentProvider {
         public static final int STATUS_UNKNOWN = -2;
 
         public final int status;
-        public final Address depositAddress;
+        public final AbstractAddress depositAddress;
         public final Value depositAmount;
         public final String depositTransactionId;
-        public final Address withdrawAddress;
+        public final AbstractAddress withdrawAddress;
         public final Value withdrawAmount;
         public final String withdrawTransactionId;
 
-        public ExchangeEntry(int status, @Nonnull Address depositAddress,
+        public ExchangeEntry(int status, @Nonnull AbstractAddress depositAddress,
                              @Nonnull Value depositAmount, @Nonnull String depositTransactionId,
-                             Address withdrawAddress, Value withdrawAmount,
+                             AbstractAddress withdrawAddress, Value withdrawAmount,
                              String withdrawTransactionId) {
             this.status = status;
             this.depositAddress = checkNotNull(depositAddress);
@@ -269,7 +275,7 @@ public class ExchangeHistoryProvider extends ContentProvider {
             this.withdrawTransactionId = withdrawTransactionId;
         }
 
-        public ExchangeEntry(Address depositAddress, Value depositAmount, String depositTxId) {
+        public ExchangeEntry(AbstractAddress depositAddress, Value depositAmount, String depositTxId) {
             this(STATUS_INITIAL, depositAddress, depositAmount, depositTxId, null, null, null);
         }
 
@@ -289,11 +295,11 @@ public class ExchangeHistoryProvider extends ContentProvider {
             ContentValues values = new ContentValues();
             values.put(KEY_STATUS, status);
             values.put(KEY_DEPOSIT_ADDRESS, depositAddress.toString());
-            values.put(KEY_DEPOSIT_COIN_ID, depositAddress.getParameters().getId());
+            values.put(KEY_DEPOSIT_COIN_ID, depositAddress.getType().getId());
             values.put(KEY_DEPOSIT_AMOUNT_UNIT, depositAmount.value);
             values.put(KEY_DEPOSIT_TXID, depositTransactionId);
             if (withdrawAddress != null) values.put(KEY_WITHDRAW_ADDRESS, withdrawAddress.toString());
-            if (withdrawAddress != null) values.put(KEY_WITHDRAW_COIN_ID, withdrawAddress.getParameters().getId());
+            if (withdrawAddress != null) values.put(KEY_WITHDRAW_COIN_ID, withdrawAddress.getType().getId());
             if (withdrawAmount != null) values.put(KEY_WITHDRAW_AMOUNT_UNIT, withdrawAmount.value);
             if (withdrawTransactionId != null) values.put(KEY_WITHDRAW_TXID, withdrawTransactionId);
             return values;
@@ -304,12 +310,16 @@ public class ExchangeHistoryProvider extends ContentProvider {
             switch (status) {
                 case STATUS_INITIAL:
                     shapeShiftStatus = ShapeShiftTxStatus.Status.NO_DEPOSITS;
+                    break;
                 case STATUS_PROCESSING:
                     shapeShiftStatus = ShapeShiftTxStatus.Status.RECEIVED;
+                    break;
                 case STATUS_COMPLETE:
                     shapeShiftStatus = ShapeShiftTxStatus.Status.COMPLETE;
+                    break;
                 case STATUS_FAILED:
                     shapeShiftStatus = ShapeShiftTxStatus.Status.FAILED;
+                    break;
                 case STATUS_UNKNOWN:
                 default:
                     shapeShiftStatus = ShapeShiftTxStatus.Status.UNKNOWN;

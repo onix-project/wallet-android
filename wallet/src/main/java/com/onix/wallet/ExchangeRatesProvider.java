@@ -35,7 +35,7 @@ import com.onix.core.coins.FiatValue;
 import com.onix.core.coins.Value;
 import com.onix.core.util.ExchangeRateBase;
 import com.onix.wallet.util.NetworkUtils;
-import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 import com.squareup.okhttp.OkHttpClient;
 import com.squareup.okhttp.Request;
 import com.squareup.okhttp.Response;
@@ -102,7 +102,7 @@ public class ExchangeRatesProvider extends ContentProvider {
     private static final String BASE_URL = "https://ticker.onixcoin.info";
     private static final String TO_LOCAL_URL = BASE_URL + "/to-local/%s";
     private static final String TO_CRYPTO_URL = BASE_URL + "/to-crypto/%s";
-    private static final String COINOMI_SOURCE = "https://github.com/onix-project/wallet-android";
+    private static final String COINOMI_SOURCE = "https://github.com/jestevez/coinomi-android";
 
     private static final Logger log = LoggerFactory.getLogger(ExchangeRatesProvider.class);
 
@@ -169,9 +169,9 @@ public class ExchangeRatesProvider extends ContentProvider {
         return rate;
     }
 
-    public static List<ExchangeRate> getRates(final Context context,
+    public static Map<String, ExchangeRate> getRates(final Context context,
                                               @Nonnull String localSymbol) {
-        ImmutableList.Builder<ExchangeRate> builder = ImmutableList.builder();
+        ImmutableMap.Builder<String, ExchangeRate> builder = ImmutableMap.builder();
 
         if (context != null) {
             final Uri uri = contentUriToCrypto(context.getPackageName(), localSymbol, true);
@@ -181,7 +181,8 @@ public class ExchangeRatesProvider extends ContentProvider {
             if (cursor != null && cursor.getCount() > 0) {
                 cursor.moveToFirst();
                 do {
-                    builder.add(getExchangeRate(cursor));
+                    ExchangeRate rate = getExchangeRate(cursor);
+                    builder.put(rate.currencyCodeId, rate);
                 } while (cursor.moveToNext());
                 cursor.close();
             }
@@ -330,7 +331,7 @@ public class ExchangeRatesProvider extends ContentProvider {
         try {
             Response response = client.newCall(request).execute();
             if (response.isSuccessful()) {
-                log.info("fetched exchange rates from {} ({}), {} chars, took {} ms", url,
+                log.info("fetched exchange rates from {}, took {} ms", url,
                         System.currentTimeMillis() - start);
                 return new JSONObject(response.body().string());
             } else {

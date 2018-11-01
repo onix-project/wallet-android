@@ -18,11 +18,9 @@ package com.onix.wallet.ui;
  */
 
 
-import android.app.Activity;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.SharedPreferences.OnSharedPreferenceChangeListener;
-
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Bundle;
@@ -63,7 +61,7 @@ import javax.annotation.CheckForNull;
  * @author John L. Jegutanis
  */
 public final class ExchangeRatesFragment extends ListFragment implements OnSharedPreferenceChangeListener {
-    private Activity activity;
+    private Context context;
     private WalletApplication application;
     private Configuration config;
     private com.onix.core.wallet.Wallet wallet;
@@ -83,11 +81,11 @@ public final class ExchangeRatesFragment extends ListFragment implements OnShare
     private CoinType type;
 
     @Override
-    public void onAttach(final Activity activity) {
-        super.onAttach(activity);
+    public void onAttach(final Context context) {
+        super.onAttach(context);
 
-        this.activity = activity;
-        this.application = (WalletApplication) activity.getApplication();
+        this.context = context;
+        this.application = (WalletApplication) context.getApplicationContext();
         this.config = application.getConfiguration();
         this.wallet = application.getWallet();
 
@@ -103,13 +101,13 @@ public final class ExchangeRatesFragment extends ListFragment implements OnShare
         } else {
             type = BitcoinMain.get();
         }
-        contentUri = ExchangeRatesProvider.contentUriToLocal(activity.getPackageName(),
+        contentUri = ExchangeRatesProvider.contentUriToLocal(context.getPackageName(),
                 type.getSymbol(), false);
 
         defaultCurrency = config.getExchangeCurrencyCode();
         config.registerOnSharedPreferenceChangeListener(this);
 
-        adapter = new ExchangeRatesAdapter(activity);
+        adapter = new ExchangeRatesAdapter(context);
         setListAdapter(adapter);
 
         loaderManager.initLoader(ID_RATE_LOADER, null, rateLoaderCallbacks);
@@ -196,7 +194,6 @@ public final class ExchangeRatesFragment extends ListFragment implements OnShare
 
         defaultCurrency = exchangeRate.currencyCodeId;
         config.setExchangeCurrencyCode(defaultCurrency);
-        updateView();
 
         Toast.makeText(getActivity(), getString(R.string.set_local_currency, defaultCurrency),
                 Toast.LENGTH_SHORT).show();
@@ -225,10 +222,9 @@ public final class ExchangeRatesFragment extends ListFragment implements OnShare
         @Override
         public Loader<Cursor> onCreateLoader(final int id, final Bundle args) {
             if (query == null) {
-                return new CursorLoader(activity, contentUri, null, null, null, null);
+                return new CursorLoader(context, contentUri, null, null, null, null);
             } else {
-                return new CursorLoader(activity, contentUri, null, null, null, null);
-//                return new CursorLoader(activity, contentUri, null, ExchangeRatesProvider.QUERY_PARAM_Q, new String[]{query}, null);
+                return new CursorLoader(context, contentUri, null, null, null, null);
             }
         }
 
@@ -262,43 +258,7 @@ public final class ExchangeRatesFragment extends ListFragment implements OnShare
             return -1;
         }
     };
-//
-//    private final LoaderCallbacks<Coin> balanceLoaderCallbacks = new LoaderManager.LoaderCallbacks<Coin>() {
-//        @Override
-//        public Loader<Coin> onCreateLoader(final int id, final Bundle args) {
-//            return new WalletBalanceLoader(activity, wallet);
-//        }
-//
-//        @Override
-//        public void onLoadFinished(final Loader<Coin> loader, final Coin balance) {
-//            ExchangeRatesFragment.this.balance = balance;
-//
-//            updateView();
-//        }
-//
-//        @Override
-//        public void onLoaderReset(final Loader<Coin> loader) {
-//        }
-//    };
-//
-//    private final LoaderCallbacks<BlockchainState> blockchainStateLoaderCallbacks = new LoaderManager.LoaderCallbacks<BlockchainState>() {
-//        @Override
-//        public Loader<BlockchainState> onCreateLoader(final int id, final Bundle args) {
-//            return new BlockchainStateLoader(activity);
-//        }
-//
-//        @Override
-//        public void onLoadFinished(final Loader<BlockchainState> loader, final BlockchainState blockchainState) {
-//            ExchangeRatesFragment.this.blockchainState = blockchainState;
-//
-//            updateView();
-//        }
-//
-//        @Override
-//        public void onLoaderReset(final Loader<BlockchainState> loader) {
-//        }
-//    };
-//
+
     private final class ExchangeRatesAdapter extends ResourceCursorAdapter {
         private Coin rateBase = Coin.COIN;
 
@@ -319,9 +279,6 @@ public final class ExchangeRatesFragment extends ListFragment implements OnShare
 
             view.setBackgroundResource(isDefaultCurrency ? R.color.bg_list_selected : R.color.bg_list);
 
-//            final View defaultView = view.findViewById(R.id.exchange_rate_row_default);
-//            defaultView.setVisibility(isDefaultCurrency ? View.VISIBLE : View.INVISIBLE);
-
             final TextView currencyCodeView = (TextView) view.findViewById(R.id.exchange_rate_row_currency_code);
             currencyCodeView.setText(exchangeRate.currencyCodeId);
 
@@ -335,11 +292,6 @@ public final class ExchangeRatesFragment extends ListFragment implements OnShare
                 currencyNameView.setVisibility(View.INVISIBLE);
             }
 
-//            final CurrencyTextView rateView = (CurrencyTextView) view.findViewById(R.id.exchange_rate_row_rate);
-//            rateView.setFormat(Constants.LOCAL_CURRENCY_FORMAT);
-//            rateView.setAmount(exchangeRate.rate.coinToFiat(rateBase));
-
-
             final Amount rateAmountUnitView = (Amount) view.findViewById(R.id.exchange_rate_row_rate_unit);
             rateAmountUnitView.setAmount(GenericUtils.formatCoinValue(type, rateBase, true));
             rateAmountUnitView.setSymbol(type.getSymbol());
@@ -348,17 +300,6 @@ public final class ExchangeRatesFragment extends ListFragment implements OnShare
             Value fiatAmount = exchangeRate.rate.convert(type, rateBase);
             rateAmountView.setAmount(GenericUtils.formatFiatValue(fiatAmount));
             rateAmountView.setSymbol(fiatAmount.type.getSymbol());
-
-//            final CurrencyTextView walletView = (CurrencyTextView) view.findViewById(R.id.exchange_rate_row_balance);
-//            walletView.setFormat(Constants.LOCAL_FORMAT);
-//            if (blockchainState == null || !blockchainState.replaying) {
-//                walletView.setAmount(exchangeRate.rate.coinToFiat(balance));
-//                walletView.setStrikeThru(Constants.TEST);
-//            } else {
-//                walletView.setText("n/a");
-//                walletView.setStrikeThru(false);
-//            }
-//            walletView.setTextColor(getResources().getColor(R.color.fg_less_significant));
         }
     }
 }

@@ -1,11 +1,15 @@
 package com.onix.wallet.ui;
 
+import android.app.AlertDialog;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.TextView;
 
 import com.onix.wallet.R;
 import com.onix.wallet.util.Fonts;
+
+import butterknife.ButterKnife;
+import butterknife.OnClick;
 
 public class AboutActivity extends BaseWalletActivity {
 
@@ -14,6 +18,7 @@ public class AboutActivity extends BaseWalletActivity {
         super.onCreate(savedInstanceState);
 
         setContentView(R.layout.activity_about);
+        ButterKnife.bind(this);
 
         getSupportActionBar().setDisplayHomeAsUpEnabled(true);
         getSupportActionBar().setDisplayShowHomeEnabled(false);
@@ -25,6 +30,14 @@ public class AboutActivity extends BaseWalletActivity {
             version.setVisibility(View.INVISIBLE);
         }
 
-       // Fonts.setTypeface(findViewById(R.id.translation_globe), Fonts.Font.COINOMI_FONT_ICONS);
+        //Fonts.setTypeface(findViewById(R.id.translation_globe), Fonts.Font.COINOMI_FONT_ICONS);
+    }
+
+    @OnClick(R.id.terms_of_service_button)
+    void onTermsOfUseClick() {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.terms_of_service_title)
+                .setMessage(R.string.terms_of_service)
+                .setPositiveButton(R.string.button_ok, null).create().show();
     }
 }

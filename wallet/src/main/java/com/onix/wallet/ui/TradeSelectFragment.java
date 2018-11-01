@@ -1,16 +1,13 @@
 package com.onix.wallet.ui;
 
-import android.app.Activity;
 import android.app.AlertDialog;
-import android.app.Dialog;
+import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
-import android.support.annotation.NonNull;
-import android.support.v4.app.DialogFragment;
 import android.support.v4.app.Fragment;
 import android.view.LayoutInflater;
 import android.view.Menu;
@@ -28,7 +25,6 @@ import com.onix.core.coins.CoinType;
 import com.onix.core.coins.Value;
 import com.onix.core.exchange.shapeshift.ShapeShift;
 import com.onix.core.exchange.shapeshift.data.ShapeShiftCoins;
-import com.onix.core.exchange.shapeshift.data.ShapeShiftException;
 import com.onix.core.exchange.shapeshift.data.ShapeShiftMarketInfo;
 import com.onix.core.util.ExchangeRate;
 import com.onix.core.wallet.Wallet;
@@ -37,8 +33,10 @@ import com.onix.wallet.Constants;
 import com.onix.wallet.R;
 import com.onix.wallet.WalletApplication;
 import com.onix.wallet.tasks.AddCoinTask;
+import com.onix.wallet.tasks.ExchangeCheckSupportedCoinsTask;
 import com.onix.wallet.tasks.MarketInfoPollTask;
 import com.onix.wallet.ui.adaptors.AvailableAccountsAdaptor;
+import com.onix.wallet.ui.dialogs.ConfirmAddCoinUnlockWalletDialog;
 import com.onix.wallet.ui.widget.AmountEditView;
 import com.onix.wallet.util.Keyboard;
 import com.onix.wallet.util.ThrottlingWalletChangeListener;
@@ -63,7 +61,7 @@ import static com.onix.core.coins.Value.canCompare;
 /**
  * @author John L. Jegutanis
  */
-public class TradeSelectFragment extends Fragment {
+public class TradeSelectFragment extends Fragment implements ExchangeCheckSupportedCoinsTask.Listener, AddCoinTask.Listener {
     private static final Logger log = LoggerFactory.getLogger(TradeSelectFragment.class);
 
     private static final int UPDATE_MARKET = 0;
@@ -72,6 +70,10 @@ public class TradeSelectFragment extends Fragment {
     private static final int VALIDATE_AMOUNT = 3;
     private static final int INITIAL_TASK_ERROR = 4;
     private static final int UPDATE_AVAILABLE_COINS = 5;
+
+    private static final String INITIAL_TASK_BUSY_DIALOG_TAG = "initial_task_busy_dialog_tag";
+    private static final String ADD_COIN_TASK_BUSY_DIALOG_TAG = "add_coin_task_busy_dialog_tag";
+    private static final String ADD_COIN_DIALOG_TAG = "add_coin_dialog_tag";
 
     // UI & misc
     private WalletApplication application;
@@ -94,10 +96,10 @@ public class TradeSelectFragment extends Fragment {
 
     // Tasks
     private MarketInfoTask marketTask;
-    private InitialCheckTask initialTask;
+    private ExchangeCheckSupportedCoinsTask initialTask;
     private Timer timer;
     private MyMarketInfoPollTask pollTask;
-    private AddCoinAndProceedTask addCoinAndProceedTask;
+    private AddCoinTask addCoinAndProceedTask;
 
     // State
     private WalletAccount sourceAccount;
@@ -122,6 +124,7 @@ public class TradeSelectFragment extends Fragment {
         super.onCreate(savedInstanceState);
 
         setHasOptionsMenu(true);
+        setRetainInstance(true); // Retain fragment as we are running async tasks
 
         // Select some default coins
         sourceAccount = application.getAccount(application.getConfiguration().getLastAccountId());
@@ -235,15 +238,14 @@ public class TradeSelectFragment extends Fragment {
 
 
     @Override
-    public void onAttach(Activity activity) {
-        super.onAttach(activity);
+    public void onAttach(final Context context) {
+        super.onAttach(context);
         try {
-            this.listener = (Listener) activity;
-            this.application = (WalletApplication) activity.getApplication();
+            this.listener = (Listener) context;
+            this.application = (WalletApplication) context.getApplicationContext();
             this.wallet = application.getWallet();
         } catch (ClassCastException e) {
-            throw new ClassCastException(activity.toString()
-                    + " must implement " + TradeSelectFragment.Listener.class);
+            throw new ClassCastException(context.getClass() + " must implement " + Listener.class);
         }
     }
 
@@ -286,6 +288,7 @@ public class TradeSelectFragment extends Fragment {
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         switch (item.getItemId()) {
+            // TODO allow to trade all coins
 //            case R.id.action_empty_wallet:
 //                setAmountForEmptyWallet();
 //                return true;
@@ -328,17 +331,44 @@ public class TradeSelectFragment extends Fragment {
             return;
         }
 
-        createToAccountAndProceedDialog.show(getFragmentManager(), null);
+        ConfirmAddCoinUnlockWalletDialog.getInstance(destinationType, wallet.isEncrypted())
+                .show(getFragmentManager(), ADD_COIN_DIALOG_TAG);
     }
 
     /**
      * Start account creation task and proceed
      */
-    private void maybeStartAddCoinAndProceedTask(@Nullable CharSequence password) {
+    void maybeStartAddCoinAndProceedTask(@Nullable String description, @Nullable CharSequence password) {
         if (addCoinAndProceedTask == null) {
-            addCoinAndProceedTask = new AddCoinAndProceedTask(destinationType, wallet, password);
+            addCoinAndProceedTask = new AddCoinTask(this, destinationType, wallet, description, password);
             addCoinAndProceedTask.execute();
         }
+    }
+
+    @Override
+    public void onAddCoinTaskStarted() {
+        Dialogs.ProgressDialogFragment.show(getFragmentManager(),
+                getResources().getString(R.string.adding_coin_working, destinationType.getName()),
+                ADD_COIN_TASK_BUSY_DIALOG_TAG);
+    }
+
+    @Override
+    public void onAddCoinTaskFinished(Exception error, WalletAccount newAccount) {
+        if (Dialogs.dismissAllowingStateLoss(getFragmentManager(), ADD_COIN_TASK_BUSY_DIALOG_TAG)) return;
+
+        if (error != null) {
+            if (error instanceof KeyCrypterException) {
+                showPasswordRetryDialog();
+            } else {
+                ACRA.getErrorReporter().handleSilentException(error);
+                Toast.makeText(getActivity(), R.string.error_generic, Toast.LENGTH_LONG).show();
+            }
+        } else {
+            destinationAccount = newAccount;
+            destinationType = newAccount.getCoinType();
+            onHandleNext();
+        }
+        addCoinAndProceedTask = null;
     }
 
     private void addSourceListener() {
@@ -480,8 +510,34 @@ public class TradeSelectFragment extends Fragment {
 
     private void maybeStartInitialTask() {
         if (initialTask == null) {
-            initialTask = new InitialCheckTask();
+            initialTask = new ExchangeCheckSupportedCoinsTask(this, application);
             initialTask.execute();
+        } else {
+
+        }
+    }
+
+    @Override
+    public void onExchangeCheckSupportedCoinsTaskStarted() {
+        Dialogs.ProgressDialogFragment.show(getFragmentManager(),
+                getString(R.string.contacting_exchange),
+                INITIAL_TASK_BUSY_DIALOG_TAG);
+    }
+
+    @Override
+    public void onExchangeCheckSupportedCoinsTaskFinished(Exception error, ShapeShiftCoins shapeShiftCoins) {
+        if (Dialogs.dismissAllowingStateLoss(getFragmentManager(), INITIAL_TASK_BUSY_DIALOG_TAG)) return;
+
+        if (error != null) {
+            log.warn("Could not get ShapeShift coins", error);
+            handler.sendMessage(handler.obtainMessage(INITIAL_TASK_ERROR, error.getMessage()));
+        } else {
+            if (shapeShiftCoins.isError) {
+                log.warn("Could not get ShapeShift coins: {}", shapeShiftCoins.errorMessage);
+                handler.sendMessage(handler.obtainMessage(INITIAL_TASK_ERROR, shapeShiftCoins.errorMessage));
+            } else {
+                handler.sendMessage(handler.obtainMessage(UPDATE_AVAILABLE_COINS, shapeShiftCoins));
+            }
         }
     }
 
@@ -782,7 +838,7 @@ public class TradeSelectFragment extends Fragment {
      * Get the lowest deposit or withdraw for the provided amount type
      */
     private Value getLowestAmount(Value amount) {
-        Value min = amount.type.minNonDust();
+        Value min = amount.type.getMinNonDust();
         if (minimumDeposit != null) {
             if (minimumDeposit.isOfType(min)) {
                 min = Value.max(minimumDeposit, min);
@@ -993,48 +1049,6 @@ public class TradeSelectFragment extends Fragment {
         }
     }
 
-    private class InitialCheckTask extends AsyncTask<Void, Void, Exception> {
-        private Dialogs.ProgressDialogFragment busyDialog;
-        private ShapeShiftCoins shapeShiftCoins;
-
-        @Override
-        protected void onPreExecute() {
-            busyDialog = Dialogs.ProgressDialogFragment.newInstance(
-                    getString(R.string.contacting_exchange));
-//            busyDialog.setCancelable(false);
-            busyDialog.show(getFragmentManager(), null);
-        }
-
-        @Override
-        protected Exception doInBackground(Void... params) {
-            if (!application.isConnected()) {
-                return new ShapeShiftException("No connection");
-            }
-            try {
-                shapeShiftCoins = application.getShapeShift().getCoins();
-                return null;
-            } catch (Exception e) {
-                return e;
-            }
-        }
-
-        @Override
-        protected void onPostExecute(Exception error) {
-            busyDialog.dismissAllowingStateLoss();
-            if (error != null) {
-                log.warn("Could not get ShapeShift coins", error);
-                handler.sendMessage(handler.obtainMessage(INITIAL_TASK_ERROR, error.getMessage()));
-            } else {
-                if (shapeShiftCoins.isError) {
-                    log.warn("Could not get ShapeShift coins: {}", shapeShiftCoins.errorMessage);
-                    handler.sendMessage(handler.obtainMessage(INITIAL_TASK_ERROR, shapeShiftCoins.errorMessage));
-                } else {
-                    handler.sendMessage(handler.obtainMessage(UPDATE_AVAILABLE_COINS, shapeShiftCoins));
-                }
-            }
-        }
-    }
-
     /**
      * Task to query about the market of a particular pair
      */
@@ -1078,39 +1092,6 @@ public class TradeSelectFragment extends Fragment {
         }
     }
 
-    private class AddCoinAndProceedTask extends AddCoinTask {
-        private Dialogs.ProgressDialogFragment verifyDialog;
-
-        public AddCoinAndProceedTask(CoinType type, Wallet wallet, @Nullable CharSequence password) {
-            super(type, wallet, password);
-        }
-
-        @Override
-        protected void onPreExecute() {
-            verifyDialog = Dialogs.ProgressDialogFragment.newInstance(
-                    getResources().getString(R.string.adding_coin_working, type.getName()));
-            verifyDialog.show(getFragmentManager(), null);
-        }
-
-        @Override
-        protected void onPostExecute(Exception e, WalletAccount newAccount) {
-            verifyDialog.dismiss();
-            if (e != null) {
-                if (e instanceof KeyCrypterException) {
-                    showPasswordRetryDialog();
-                } else {
-                    ACRA.getErrorReporter().handleSilentException(e);
-                    Toast.makeText(getActivity(), R.string.error_generic, Toast.LENGTH_LONG).show();
-                }
-            } else {
-                destinationAccount = newAccount;
-                destinationType = newAccount.getCoinType();
-                onHandleNext();
-            }
-            addCoinAndProceedTask = null;
-        }
-    }
-
     private void showPasswordRetryDialog() {
         DialogBuilder.warn(getActivity(), R.string.unlocking_wallet_error_title)
                 .setMessage(R.string.unlocking_wallet_error_detail)
@@ -1123,34 +1104,4 @@ public class TradeSelectFragment extends Fragment {
                 })
                 .create().show();
     }
-
-    private DialogFragment createToAccountAndProceedDialog = new DialogFragment() {
-        @Override @NonNull
-        public Dialog onCreateDialog(Bundle savedInstanceState) {
-            final LayoutInflater inflater = LayoutInflater.from(getActivity());
-            final View view = inflater.inflate(R.layout.get_password_dialog, null);
-            final TextView passwordView = (TextView) view.findViewById(R.id.password);
-            // If not encrypted, don't ask the password
-            if (!wallet.isEncrypted()) {
-                view.findViewById(R.id.password_message).setVisibility(View.GONE);
-                passwordView.setVisibility(View.GONE);
-            }
-
-            String title = getString(R.string.adding_coin_confirmation_title,
-                    destinationType.getName());
-
-            return new DialogBuilder(getActivity()).setTitle(title).setView(view)
-                    .setNegativeButton(R.string.button_cancel, null)
-                    .setPositiveButton(R.string.button_add, new DialogInterface.OnClickListener() {
-                        @Override
-                        public void onClick(DialogInterface dialog, int which) {
-                            if (wallet.isEncrypted()) {
-                                maybeStartAddCoinAndProceedTask(passwordView.getText());
-                            } else {
-                                maybeStartAddCoinAndProceedTask(null);
-                            }
-                        }
-                    }).create();
-        }
-    };
 }
