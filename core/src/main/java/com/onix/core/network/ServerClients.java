@@ -1,13 +1,20 @@
 package com.onix.core.network;
 
 import com.onix.core.coins.CoinType;
+import com.onix.core.coins.families.BitFamily;
+import com.onix.core.coins.families.NxtFamily;
+import com.onix.core.exceptions.UnsupportedCoinTypeException;
+import com.onix.core.network.interfaces.BlockchainConnection;
 import com.onix.core.wallet.WalletAccount;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
 import java.util.HashMap;
 import java.util.List;
+
+import javax.annotation.Nullable;
 
 /**
  * @author John L. Jegutanis
@@ -15,7 +22,7 @@ import java.util.List;
 public class ServerClients {
     private static final Logger log = LoggerFactory.getLogger(ServerClient.class);
     private final ConnectivityHelper connectivityHelper;
-    private HashMap<CoinType, ServerClient> connections = new HashMap<>();
+    private HashMap<CoinType, BlockchainConnection> connections = new HashMap<>();
     private HashMap<CoinType, CoinAddress> addresses = new HashMap<>();
 
 
@@ -23,6 +30,8 @@ public class ServerClients {
         @Override
         public boolean isConnected() { return true; }
     };
+    private File cacheDir;
+    private int cacheSize;
 
     public ServerClients(List<CoinAddress> coins) {
         // Supply a dumb ConnectivityHelper that reports that connection is always available
@@ -41,30 +50,40 @@ public class ServerClients {
     }
 
     public void resetAccount(WalletAccount account) {
-        ServerClient connection = connections.get(account.getCoinType());
+        BlockchainConnection connection = connections.get(account.getCoinType());
         if (connection == null) return;
         connection.addEventListener(account);
         connection.resetConnection();
     }
 
-    public void startAsync(WalletAccount pocket) {
-        if (pocket == null) {
+    public void startAsync(WalletAccount account) {
+        if (account == null) {
             log.warn("Provided wallet account is null, not doing anything");
             return;
         }
-        CoinType type = pocket.getCoinType();
-        ServerClient connection = getConnection(type);
-        connection.addEventListener(pocket);
+        CoinType type = account.getCoinType();
+        BlockchainConnection connection = getConnection(type);
+        connection.addEventListener(account);
         connection.startAsync();
     }
 
-    private ServerClient getConnection(CoinType type) {
+    private BlockchainConnection getConnection(CoinType type) {
         if (connections.containsKey(type)) return connections.get(type);
         // Try to create a connection
         if (addresses.containsKey(type)) {
-            ServerClient client = new ServerClient(addresses.get(type), connectivityHelper);
-            connections.put(type, client);
-            return client;
+            if (type instanceof BitFamily) {
+                ServerClient client = new ServerClient(addresses.get(type), connectivityHelper);
+                client.setCacheDir(cacheDir, cacheSize);
+                connections.put(type, client);
+                return client;
+            } else if (type instanceof NxtFamily) {
+                NxtServerClient client = new NxtServerClient(addresses.get(type), connectivityHelper);
+                client.setCacheDir(cacheDir, cacheSize);
+                connections.put(type, client);
+                return client;
+            } else {
+                throw new UnsupportedCoinTypeException(type);
+            }
         } else {
             // Should not happen
             throw new RuntimeException("Tried to create connection for an unknown server.");
@@ -72,23 +91,40 @@ public class ServerClients {
     }
 
     public void stopAllAsync() {
-        for (ServerClient client : connections.values()) {
+        for (BlockchainConnection client : connections.values()) {
             client.stopAsync();
         }
         connections.clear();
     }
 
     public void ping() {
+        ping(null);
+    }
+
+    public void ping(@Nullable String versionString) {
         for (final CoinType type : connections.keySet()) {
-            ServerClient connection = connections.get(type);
-            if (connection.isActivelyConnected()) connection.ping();
+            BlockchainConnection connection = connections.get(type);
+            if (connection.isActivelyConnected()) connection.ping(versionString);
         }
     }
 
     public void resetConnections() {
         for (final CoinType type : connections.keySet()) {
-            ServerClient connection = connections.get(type);
+            BlockchainConnection connection = connections.get(type);
             if (connection.isActivelyConnected()) connection.resetConnection();
+        }
+    }
+
+    public void setCacheDir(File cacheDir, int cacheSize) {
+        this.cacheDir = cacheDir;
+        this.cacheSize = cacheSize;
+    }
+
+    public void startOrResetAccountAsync(WalletAccount account) {
+        if (connections.containsKey(account.getCoinType())) {
+            resetAccount(account);
+        } else {
+            startAsync(account);
         }
     }
 }

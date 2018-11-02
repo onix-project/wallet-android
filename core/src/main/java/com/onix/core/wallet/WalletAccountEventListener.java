@@ -2,8 +2,6 @@ package com.onix.core.wallet;
 
 import com.onix.core.coins.Value;
 
-import org.bitcoinj.core.Transaction;
-
 /**
  * @author John L. Jegutanis
  */
@@ -13,13 +11,13 @@ public interface WalletAccountEventListener {
 
     void onNewBlock(WalletAccount pocket);
 
-    void onTransactionConfidenceChanged(WalletAccount pocket, Transaction tx);
+    void onTransactionConfidenceChanged(WalletAccount pocket, AbstractTransaction tx);
 
-    void onTransactionBroadcastFailure(WalletAccount pocket, Transaction tx);
+    void onTransactionBroadcastFailure(WalletAccount pocket, AbstractTransaction tx);
 
-    void onTransactionBroadcastSuccess(WalletAccount pocket, Transaction tx);
+    void onTransactionBroadcastSuccess(WalletAccount pocket, AbstractTransaction tx);
 
     void onWalletChanged(final WalletAccount pocket);
 
-    void onConnectivityStatus(WalletPocketConnectivity pocketConnectivity);
+    void onConnectivityStatus(WalletConnectivityStatus connectivityStatus);
 }

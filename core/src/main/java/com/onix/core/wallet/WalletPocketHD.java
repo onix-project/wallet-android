@@ -19,16 +19,14 @@
 package com.onix.core.wallet;
 
 import com.onix.core.coins.CoinType;
+import com.onix.core.exceptions.Bip44KeyLookAheadExceededException;
 import com.onix.core.protos.Protos;
-import com.onix.core.wallet.exceptions.Bip44KeyLookAheadExceededException;
+import com.onix.core.util.KeyUtils;
+import com.onix.core.wallet.families.bitcoin.BitAddress;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 
-import org.bitcoinj.core.Address;
-import org.bitcoinj.core.AddressFormatException;
-import org.bitcoinj.core.Coin;
 import org.bitcoinj.core.ECKey;
-import org.bitcoinj.core.InsufficientMoneyException;
 import org.bitcoinj.crypto.ChildNumber;
 import org.bitcoinj.crypto.DeterministicKey;
 import org.bitcoinj.crypto.KeyCrypter;
@@ -38,9 +36,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.spongycastle.crypto.params.KeyParameter;
 
-import java.security.SignatureException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -53,6 +49,7 @@ import javax.annotation.Nullable;
 import static com.onix.core.Preconditions.checkArgument;
 import static com.onix.core.Preconditions.checkNotNull;
 import static com.onix.core.Preconditions.checkState;
+import static com.onix.core.util.BitAddressUtils.getHash160;
 import static org.bitcoinj.wallet.KeyChain.KeyPurpose.CHANGE;
 import static org.bitcoinj.wallet.KeyChain.KeyPurpose.RECEIVE_FUNDS;
 import static org.bitcoinj.wallet.KeyChain.KeyPurpose.REFUND;
@@ -62,12 +59,11 @@ import static org.bitcoinj.wallet.KeyChain.KeyPurpose.REFUND;
  *
  *
  */
-public class WalletPocketHD extends AbstractWallet {
+public class WalletPocketHD extends BitWalletBase {
     private static final Logger log = LoggerFactory.getLogger(WalletPocketHD.class);
 
-    private final TransactionCreator transactionCreator;
-
-    @VisibleForTesting SimpleHDKeyChain keys;
+    @VisibleForTesting
+    protected SimpleHDKeyChain keys;
 
     public WalletPocketHD(DeterministicKey rootKey, CoinType coinType,
                           @Nullable KeyCrypter keyCrypter, @Nullable KeyParameter key) {
@@ -75,18 +71,19 @@ public class WalletPocketHD extends AbstractWallet {
     }
 
     WalletPocketHD(SimpleHDKeyChain keys, CoinType coinType) {
-        this(keys.getId(coinType.getId()), keys, coinType);
+        this(KeyUtils.getPublicKeyId(coinType, keys.getRootKey().getPubKey()), keys, coinType);
     }
 
     WalletPocketHD(String id, SimpleHDKeyChain keys, CoinType coinType) {
         super(checkNotNull(coinType), id);
         this.keys = checkNotNull(keys);
-        transactionCreator = new TransactionCreator(this);
     }
 
-    /******************************************************************************************************************/
-
-    //region Vending transactions and other internal state
+    ////////////////////////////////////////////////////////////////////////////////////////////////
+    //
+    // Region vending transactions and other internal state
+    //
+    ////////////////////////////////////////////////////////////////////////////////////////////////
 
     /**
      * Get the BIP44 index of this account
@@ -100,19 +97,11 @@ public class WalletPocketHD extends AbstractWallet {
         }
     }
 
-
-    @Override
-    public boolean equals(WalletAccount other) {
-        return other != null &&
-                getId().equals(other.getId()) &&
-                getCoinType().equals(other.getCoinType());
-    }
-
-    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////////////////////
     //
     // Serialization support
     //
-    //////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////////////////////
 
     List<Protos.Key> serializeKeychainToProtobuf() {
         lock.lock();
@@ -132,11 +121,11 @@ public class WalletPocketHD extends AbstractWallet {
         }
     }
 
-    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////////////////////
     //
     // Encryption support
     //
-    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////////////////////////
 
 
     @Override
@@ -207,102 +196,6 @@ public class WalletPocketHD extends AbstractWallet {
         }
     }
 
-    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    //
-    // Transaction signing support
-    //
-    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-    /**
-     * Sends coins to the given address but does not broadcast the resulting pending transaction.
-     */
-    public SendRequest sendCoinsOffline(Address address, Coin amount) throws InsufficientMoneyException {
-        return sendCoinsOffline(address, amount, (KeyParameter) null);
-    }
-
-    /**
-     * {@link #sendCoinsOffline(Address, Coin)}
-     */
-    public SendRequest sendCoinsOffline(Address address, Coin amount, @Nullable String password)
-            throws InsufficientMoneyException {
-        KeyParameter key = null;
-        if (password != null) {
-            checkState(isEncrypted());
-            key = checkNotNull(getKeyCrypter()).deriveKey(password);
-        }
-        return sendCoinsOffline(address, amount, key);
-    }
-
-    /**
-     * {@link #sendCoinsOffline(Address, Coin)}
-     */
-    public SendRequest sendCoinsOffline(Address address, Coin amount, @Nullable KeyParameter aesKey)
-            throws InsufficientMoneyException {
-        checkState(address.getParameters() instanceof CoinType);
-        SendRequest request = SendRequest.to(address, amount);
-        request.aesKey = aesKey;
-
-        return request;
-    }
-
-    @Override
-    public boolean isAddressMine(Address address) {
-        return address != null && address.getParameters().equals(coinType) &&
-                (address.isP2SHAddress() ?
-                        isPayToScriptHashMine(address.getHash160()) :
-                        isPubKeyHashMine(address.getHash160()));
-    }
-
-    @Override
-    public void signMessage(SignedMessage unsignedMessage, @Nullable KeyParameter aesKey) {
-        String message = unsignedMessage.message;
-        lock.lock();
-        try {
-            ECKey key;
-            try {
-                Address address = new Address(coinType, unsignedMessage.getAddress());
-                key = findKeyFromPubHash(address.getHash160());
-            } catch (AddressFormatException e) {
-                unsignedMessage.status = SignedMessage.Status.AddressMalformed;
-                return;
-            }
-
-            if (key == null) {
-                unsignedMessage.status = SignedMessage.Status.MissingPrivateKey;
-                return;
-            }
-
-            try {
-                unsignedMessage.signature =
-                        key.signMessage(coinType.getSignedMessageHeader(), message, aesKey);
-                unsignedMessage.status = SignedMessage.Status.SignedOK;
-            } catch (ECKey.KeyIsEncryptedException e) {
-                unsignedMessage.status = SignedMessage.Status.KeyIsEncrypted;
-            } catch (ECKey.MissingPrivateKeyException e) {
-                unsignedMessage.status = SignedMessage.Status.MissingPrivateKey;
-            }
-        } finally {
-            lock.unlock();
-        }
-    }
-
-    @Override
-    public void verifyMessage(SignedMessage signedMessage) {
-        try {
-            ECKey pubKey = ECKey.signedMessageToKey(signedMessage.message, signedMessage.signature);
-            byte[] expectedPubKeyHash = new Address(null, signedMessage.address).getHash160();
-            if (Arrays.equals(expectedPubKeyHash, pubKey.getPubKeyHash())) {
-                signedMessage.status = SignedMessage.Status.VerifiedOK;
-            } else {
-                signedMessage.status = SignedMessage.Status.InvalidSigningAddress;
-            }
-        } catch (SignatureException e) {
-            signedMessage.status = SignedMessage.Status.InvalidMessageSignature;
-        } catch (AddressFormatException e) {
-            signedMessage.status = SignedMessage.Status.AddressMalformed;
-        }
-    }
-
     @Override
     public String getPublicKeySerialized() {
         // Change the path of the key to match the BIP32 paths i.e. 0H/<account index>H
@@ -313,19 +206,9 @@ public class WalletPocketHD extends AbstractWallet {
     }
 
     @Override
-    public boolean isPubKeyHashMine(byte[] pubkeyHash) {
-        return findKeyFromPubHash(pubkeyHash) != null;
-    }
-
-    @Override
     public boolean isWatchedScript(Script script) {
         // Not supported
         return false;
-    }
-
-    @Override
-    public boolean isPubKeyMine(byte[] pubkey) {
-        return findKeyFromPubKey(pubkey) != null;
     }
 
     @Override
@@ -333,47 +216,6 @@ public class WalletPocketHD extends AbstractWallet {
         // Not supported
         return false;
     }
-
-    public void completeAndSignTx(SendRequest request) throws InsufficientMoneyException {
-        if (request.completed) {
-            signTransaction(request);
-        } else {
-            completeTx(request);
-        }
-    }
-
-    /**
-     * Given a spend request containing an incomplete transaction, makes it valid by adding outputs and signed inputs
-     * according to the instructions in the request. The transaction in the request is modified by this method.
-     *
-     * @param req a SendRequest that contains the incomplete transaction and details for how to make it valid.
-     * @throws InsufficientMoneyException if the request could not be completed due to not enough balance.
-     * @throws IllegalArgumentException if you try and complete the same SendRequest twice
-     */
-    public void completeTx(SendRequest req) throws InsufficientMoneyException {
-        lock.lock();
-        try {
-            transactionCreator.completeTx(req);
-        } finally {
-            lock.unlock();
-        }
-    }
-
-    /**
-     * <p>Given a send request containing transaction, attempts to sign it's inputs. This method expects transaction
-     * to have all necessary inputs connected or they will be ignored.</p>
-     * <p>Actual signing is done by pluggable {@link org.bitcoinj.signers.LocalTransactionSigner}
-     * and it's not guaranteed that transaction will be complete in the end.</p>
-     */
-    public void signTransaction(SendRequest req) {
-        lock.lock();
-        try {
-            transactionCreator.signTransaction(req);
-        } finally {
-            lock.unlock();
-        }
-    }
-
 
     /**
      * Locates a keypair from the basicKeyChain given the hash of the public key. This is needed
@@ -413,29 +255,45 @@ public class WalletPocketHD extends AbstractWallet {
         return null;
     }
 
-    /** {@inheritDoc} */
     @Override
-    public Address getChangeAddress() {
+    public byte[] getPublicKey() {
+        lock.lock();
+        try {
+            return keys.getRootKey().getPubKey();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    @Override
+    public BitAddress getChangeAddress() {
         return currentAddress(CHANGE);
     }
 
-    /** {@inheritDoc} */
     @Override
-    public Address getReceiveAddress() {
+    public BitAddress getReceiveAddress() {
         return currentAddress(RECEIVE_FUNDS);
     }
 
-    /** {@inheritDoc} */
+    public BitAddress getRefundAddress() { return currentAddress(REFUND); }
+
     @Override
-    public Address getRefundAddress() {
-        return currentAddress(REFUND);
+    public boolean hasUsedAddresses() {
+        return getNumberIssuedReceiveAddresses() != 0;
     }
 
-    public Address getReceiveAddress(boolean isManualAddressManagement) {
+    @Override
+    public boolean canCreateNewAddresses() {
+        return true;
+    }
+
+    @Override
+    public BitAddress getReceiveAddress(boolean isManualAddressManagement) {
         return getAddress(RECEIVE_FUNDS, isManualAddressManagement);
     }
 
-    public Address getRefundAddress(boolean isManualAddressManagement) {
+    @Override
+    public BitAddress getRefundAddress(boolean isManualAddressManagement) {
         return getAddress(REFUND, isManualAddressManagement);
     }
 
@@ -443,12 +301,12 @@ public class WalletPocketHD extends AbstractWallet {
      * Get the last used receiving address
      */
     @Nullable
-    public Address getLastUsedAddress(SimpleHDKeyChain.KeyPurpose purpose) {
+    public BitAddress getLastUsedAddress(SimpleHDKeyChain.KeyPurpose purpose) {
         lock.lock();
         try {
             DeterministicKey lastUsedKey = keys.getLastIssuedKey(purpose);
             if (lastUsedKey != null) {
-                return lastUsedKey.toAddress(coinType);
+                return BitAddress.from(type, lastUsedKey);
             } else {
                 return null;
             }
@@ -470,9 +328,9 @@ public class WalletPocketHD extends AbstractWallet {
             if (!addressesStatus.isEmpty()) {
                 int lastUsedKeyIndex = 0;
                 // Find the last used key index
-                for (Map.Entry<Address, String> entry : addressesStatus.entrySet()) {
+                for (Map.Entry<AbstractAddress, String> entry : addressesStatus.entrySet()) {
                     if (entry.getValue() == null) continue;
-                    DeterministicKey usedKey = keys.findKeyFromPubHash(entry.getKey().getHash160());
+                    DeterministicKey usedKey = keys.findKeyFromPubHash(getHash160(entry.getKey()));
                     if (usedKey != null && keys.isExternal(usedKey) && usedKey.getChildNumber().num() > lastUsedKeyIndex) {
                         lastUsedKeyIndex = usedKey.getChildNumber().num();
                     }
@@ -494,7 +352,7 @@ public class WalletPocketHD extends AbstractWallet {
      * {@link Bip44KeyLookAheadExceededException} if we requested too many addresses that
      * exceed the BIP44 look ahead threshold.
      */
-    public Address getFreshReceiveAddress() throws Bip44KeyLookAheadExceededException {
+    public BitAddress getFreshReceiveAddress() throws Bip44KeyLookAheadExceededException {
         lock.lock();
         try {
             if (!canCreateFreshReceiveAddress()) {
@@ -508,11 +366,12 @@ public class WalletPocketHD extends AbstractWallet {
         }
     }
 
-    public Address getFreshReceiveAddress(boolean isManualAddressManagement) throws Bip44KeyLookAheadExceededException {
+    public BitAddress getFreshReceiveAddress(boolean isManualAddressManagement)
+            throws Bip44KeyLookAheadExceededException {
         lock.lock();
         try {
-            Address newAddress = null;
-            Address freshAddress = getFreshReceiveAddress();
+            BitAddress newAddress = null;
+            BitAddress freshAddress = getFreshReceiveAddress();
             if (isManualAddressManagement) {
                 newAddress = getLastUsedAddress(RECEIVE_FUNDS);
             }
@@ -553,16 +412,16 @@ public class WalletPocketHD extends AbstractWallet {
      * Returns a list of addresses that have been issued.
      * The list is sorted in descending chronological order: older in the end
      */
-    public List<Address> getIssuedReceiveAddresses() {
+    public List<AbstractAddress> getIssuedReceiveAddresses() {
         lock.lock();
         try {
             ArrayList<DeterministicKey> issuedKeys = keys.getIssuedExternalKeys();
-            ArrayList<Address> receiveAddresses = new ArrayList<Address>();
+            ArrayList<AbstractAddress> receiveAddresses = new ArrayList<>();
 
             Collections.sort(issuedKeys, HD_KEY_COMPARATOR);
 
             for (ECKey key : issuedKeys) {
-                receiveAddresses.add(key.toAddress(coinType));
+                receiveAddresses.add(BitAddress.from(type, key));
             }
             return receiveAddresses;
         } finally {
@@ -573,12 +432,12 @@ public class WalletPocketHD extends AbstractWallet {
     /**
      * Get the currently used receiving and change addresses
      */
-    public Set<Address> getUsedAddresses() {
+    public Set<AbstractAddress> getUsedAddresses() {
         lock.lock();
         try {
-            HashSet<Address> usedAddresses = new HashSet<Address>();
+            HashSet<AbstractAddress> usedAddresses = new HashSet<>();
 
-            for (Map.Entry<Address, String> entry : addressesStatus.entrySet()) {
+            for (Map.Entry<AbstractAddress, String> entry : addressesStatus.entrySet()) {
                 if (entry.getValue() != null) {
                     usedAddresses.add(entry.getKey());
                 }
@@ -590,9 +449,9 @@ public class WalletPocketHD extends AbstractWallet {
         }
     }
 
-    public Address getAddress(SimpleHDKeyChain.KeyPurpose purpose,
+    public BitAddress getAddress(SimpleHDKeyChain.KeyPurpose purpose,
                               boolean isManualAddressManagement) {
-        Address receiveAddress = null;
+        BitAddress receiveAddress = null;
         if (isManualAddressManagement) {
             receiveAddress = getLastUsedAddress(purpose);
         }
@@ -606,13 +465,13 @@ public class WalletPocketHD extends AbstractWallet {
     /**
      * Get the currently latest unused address by purpose.
      */
-    @VisibleForTesting Address currentAddress(SimpleHDKeyChain.KeyPurpose purpose) {
+    @VisibleForTesting BitAddress currentAddress(SimpleHDKeyChain.KeyPurpose purpose) {
         lock.lock();
         try {
-            return keys.getCurrentUnusedKey(purpose).toAddress(coinType);
+            return BitAddress.from(type, keys.getCurrentUnusedKey(purpose));
         } finally {
             lock.unlock();
-            subscribeIfNeeded();
+            subscribeToAddressesIfNeeded();
         }
     }
 
@@ -620,7 +479,8 @@ public class WalletPocketHD extends AbstractWallet {
      * Used to force keys creation, could take long time to complete so use it in a background
      * thread.
      */
-    @VisibleForTesting void maybeInitializeAllKeys() {
+    @VisibleForTesting
+    public void maybeInitializeAllKeys() {
         lock.lock();
         try {
             keys.maybeLookAhead();
@@ -629,20 +489,42 @@ public class WalletPocketHD extends AbstractWallet {
         }
     }
 
-    public List<Address> getActiveAddresses() {
-        ImmutableList.Builder<Address> activeAddresses = ImmutableList.builder();
-        for (DeterministicKey key : keys.getActiveKeys()) {
-            activeAddresses.add(key.toAddress(coinType));
-        }
-        return activeAddresses.build();
+    @Override
+    public String getPublicKeyMnemonic() {
+        throw new RuntimeException("Not implemented");
     }
 
-    public void markAddressAsUsed(Address address) {
+    @Override
+    public List<AbstractAddress> getActiveAddresses() {
+        lock.lock();
+        try {
+            ImmutableList.Builder<AbstractAddress> activeAddresses = ImmutableList.builder();
+            for (DeterministicKey key : keys.getActiveKeys()) {
+                activeAddresses.add(BitAddress.from(type, key));
+            }
+            return activeAddresses.build();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    @Override
+    public void markAddressAsUsed(AbstractAddress address) {
+        checkArgument(address.getType().equals(type), "Wrong address type");
+        if (address instanceof BitAddress) {
+            markAddressAsUsed((BitAddress)address);
+        } else {
+            throw new IllegalArgumentException("Wrong address class");
+        }
+
+    }
+
+    public void markAddressAsUsed(BitAddress address) {
         keys.markPubHashAsUsed(address.getHash160());
     }
 
     @Override
     public String toString() {
-        return WalletPocketHD.class.getSimpleName() + " " + id.substring(0, 4)+ " " + coinType;
+        return WalletPocketHD.class.getSimpleName() + " " + id.substring(0, 4)+ " " + type;
     }
 }

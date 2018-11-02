@@ -1,6 +1,21 @@
 package com.onix.core.wallet;
 
+import com.onix.core.coins.CoinID;
+import com.onix.core.coins.CoinType;
+import com.onix.core.coins.families.BitFamily;
+import com.onix.core.coins.families.NxtFamily;
 import com.onix.core.protos.Protos;
+import com.onix.core.util.KeyUtils;
+import com.onix.core.wallet.families.bitcoin.BitTransaction;
+import com.onix.core.wallet.families.bitcoin.OutPointOutput;
+import com.onix.core.wallet.families.nxt.NxtFamilyWallet;
+import com.onix.core.wallet.families.nxt.NxtFamilyWalletProtobufSerializer;
+import com.google.common.base.Splitter;
+import com.google.protobuf.ByteString;
+import com.google.protobuf.TextFormat;
+
+import org.bitcoinj.core.Sha256Hash;
+import org.bitcoinj.core.TransactionOutput;
 import org.bitcoinj.crypto.ChildNumber;
 import org.bitcoinj.crypto.DeterministicKey;
 import org.bitcoinj.crypto.EncryptedData;
@@ -9,16 +24,16 @@ import org.bitcoinj.crypto.KeyCrypterException;
 import org.bitcoinj.crypto.KeyCrypterScrypt;
 import org.bitcoinj.store.UnreadableWalletException;
 import org.bitcoinj.wallet.DeterministicSeed;
-import com.google.common.base.Splitter;
-import com.google.protobuf.ByteString;
-import com.google.protobuf.TextFormat;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import static com.google.common.base.Preconditions.checkState;
+import static org.bitcoinj.core.TransactionConfidence.ConfidenceType.BUILDING;
 
 /**
  * @author John L. Jegutanis
@@ -59,7 +74,7 @@ public class WalletProtobufSerializer {
 
         // Set the seed if exists
         if (wallet.getSeed() != null) {
-            Protos.Key.Builder mnemonicEntry = SimpleKeyChain.serializeEncryptableItem(wallet.getSeed());
+            Protos.Key.Builder mnemonicEntry = KeyUtils.serializeEncryptableItem(wallet.getSeed());
             mnemonicEntry.setType(Protos.Key.Type.DETERMINISTIC_MNEMONIC);
             walletBuilder.setSeed(mnemonicEntry.build());
         }
@@ -97,8 +112,10 @@ public class WalletProtobufSerializer {
         // Add serialized pockets
         for (WalletAccount account : wallet.getAllAccounts()) {
             Protos.WalletPocket pocketProto;
-            if (account instanceof AbstractWallet) {
+            if (account instanceof WalletPocketHD) {
                 pocketProto = WalletPocketProtobufSerializer.toProtobuf((WalletPocketHD) account);
+            } else if (account instanceof NxtFamilyWallet) {
+                pocketProto = NxtFamilyWalletProtobufSerializer.toProtobuf((NxtFamilyWallet) account);
             } else {
                 throw new RuntimeException("Implement serialization for: " + account.getClass());
             }
@@ -110,7 +127,7 @@ public class WalletProtobufSerializer {
 
     private static Protos.Key getMasterKeyProto(Wallet wallet) {
         DeterministicKey key = wallet.getMasterKey();
-        Protos.Key.Builder proto = SimpleKeyChain.serializeKey(key);
+        Protos.Key.Builder proto = KeyUtils.serializeKey(key);
         proto.setType(Protos.Key.Type.DETERMINISTIC_KEY);
         final Protos.DeterministicKey.Builder detKey = proto.getDeterministicKeyBuilder();
         detKey.setChainCode(ByteString.copyFrom(key.getChainCode()));
@@ -153,8 +170,10 @@ public class WalletProtobufSerializer {
      * @throws UnreadableWalletException thrown in various error conditions (see description).
      */
     public static Wallet readWallet(Protos.Wallet walletProto) throws UnreadableWalletException {
-        if (walletProto.getVersion() > 1)
+        if (walletProto.getVersion() > 3)
             throw new UnreadableWalletException.FutureVersion();
+
+        walletProto = applyProtoUpdates(walletProto);
 
         // Check if wallet is encrypted
         final KeyCrypter crypter = getKeyCrypter(walletProto);
@@ -176,8 +195,7 @@ public class WalletProtobufSerializer {
         }
 
         DeterministicKey masterKey =
-                SimpleHDKeyChain.getDeterministicKey(walletProto.getMasterKey(), null, crypter);
-
+                KeyUtils.getDeterministicKey(walletProto.getMasterKey(), null, crypter);
 
         Wallet wallet = new Wallet(masterKey, seed);
 
@@ -186,12 +204,55 @@ public class WalletProtobufSerializer {
         }
 
         WalletPocketProtobufSerializer pocketSerializer = new WalletPocketProtobufSerializer();
+        NxtFamilyWalletProtobufSerializer nxtPocketSerializer = new NxtFamilyWalletProtobufSerializer();
         for (Protos.WalletPocket pocketProto : walletProto.getPocketsList()) {
-            AbstractWallet pocket = pocketSerializer.readWallet(pocketProto, crypter);
+            CoinType type = getType(pocketProto);
+            AbstractWallet pocket;
+
+            if (type instanceof BitFamily) {
+                pocket = pocketSerializer.readWallet(pocketProto, crypter);
+            } else if (type instanceof NxtFamily) {
+                pocket = nxtPocketSerializer.readWallet(pocketProto, crypter);
+            } else {
+                throw new UnreadableWalletException("Unsupported type " + type);
+            }
+
             wallet.addAccount(pocket);
         }
 
+        applyWalletUpdates(wallet);
+
         return wallet;
+    }
+
+    private static Protos.Wallet applyProtoUpdates(Protos.Wallet walletProto) {
+        if (walletProto.getVersion() < 2) {
+            walletProto = updateV1toV2Proto(walletProto);
+        }
+
+        if (walletProto.getVersion() < 3) {
+            walletProto = updateV2toV3Proto(walletProto);
+        }
+        return walletProto;
+    }
+
+    private static void applyWalletUpdates(Wallet wallet) {
+        if (wallet.getVersion() < 2) {
+            updateV1toV2(wallet);
+        }
+
+        if (wallet.getVersion() < 3) {
+            updateV2toV3(wallet);
+        }
+    }
+
+    private static CoinType getType(Protos.WalletPocket proto) throws UnreadableWalletException {
+        try {
+            return CoinID.typeFromId(proto.getNetworkIdentifier());
+        } catch (IllegalArgumentException e) {
+            throw new UnreadableWalletException("Unknown network parameters ID " +
+                    proto.getNetworkIdentifier());
+        }
     }
 
     private static KeyCrypter getKeyCrypter(Protos.Wallet walletProto) {
@@ -232,5 +293,82 @@ public class WalletProtobufSerializer {
      */
     public static Protos.Wallet parseToProto(InputStream input) throws IOException {
         return Protos.Wallet.parseFrom(input);
+    }
+
+
+    private static Protos.Wallet updateV2toV3Proto(Protos.Wallet walletProto) {
+        checkState(walletProto.getVersion() < 3, "Can update only from version < 3");
+        Protos.Wallet.Builder b = walletProto.toBuilder();
+        for (int i = 0; i < b.getPocketsCount(); i++) {
+            Protos.WalletPocket.Builder account = b.getPocketsBuilder(i);
+            // pre v2 wallets were saving the coin name in the description
+            account.clearDescription();
+        }
+        return b.build();
+    }
+
+    private static void updateV2toV3(Wallet wallet) {
+        checkState(wallet.getVersion() < 3, "Can update only from version < 3");
+        wallet.setVersion(3);
+    }
+
+    private static Protos.Wallet updateV1toV2Proto(Protos.Wallet walletProto) {
+        checkState(walletProto.getVersion() < 2, "Can update only from version < 2");
+        // Purge blockchain data if wallet is bigger than 2mb
+        boolean purgeBlockchain = walletProto.getSerializedSize() > 200000;
+        Protos.Wallet.Builder b = walletProto.toBuilder();
+        for (int i = 0; i < b.getPocketsCount(); i++) {
+            Protos.WalletPocket.Builder account = b.getPocketsBuilder(i);
+            // Purge blockchain data if needed
+            if (purgeBlockchain) {
+                account.clearAddressStatus();
+                account.clearLastSeenBlockHash();
+                account.clearLastSeenBlockHeight();
+                account.clearLastSeenBlockTimeSecs();
+                account.clearTransaction();
+            }
+            // Update coin type ids
+            if (account.getNetworkIdentifier().equals("dogecoindark.main")) {
+                account.setNetworkIdentifier("verge.main");
+                b.setPockets(i, account);
+            }
+            if (account.getNetworkIdentifier().equals("darkcoin.main")) {
+                account.setNetworkIdentifier("dash.main");
+                b.setPockets(i, account);
+            }
+        }
+        return b.build();
+    }
+
+    private static void updateV1toV2(Wallet wallet) {
+        checkState(wallet.getVersion() < 2, "Can update only from version < 2");
+        wallet.setVersion(2);
+        for (WalletAccount walletAccount : wallet.getAllAccounts()) {
+            if (walletAccount instanceof WalletPocketHD) {
+                WalletPocketHD account = (WalletPocketHD) walletAccount;
+                // Force resync
+                account.addressesStatus.clear();
+                // Gather hashes to trim them later
+                Set<Sha256Hash> txHashes = new HashSet<>(account.rawTransactions.size());
+                // Reconstruct UTXO set
+                for (BitTransaction tx : account.rawTransactions.values()) {
+                    txHashes.add(tx.getHash());
+                    for (TransactionOutput txo : tx.getOutputs()) {
+                        if (txo.isAvailableForSpending() && txo.isMineOrWatched(account)) {
+                            OutPointOutput utxo = new OutPointOutput(tx, txo.getIndex());
+                            if (tx.getConfidenceType() == BUILDING) {
+                                utxo.setAppearedAtChainHeight(tx.getAppearedAtChainHeight());
+                                utxo.setDepthInBlocks(tx.getDepthInBlocks());
+                            }
+                            account.unspentOutputs.put(utxo.getOutPoint(), utxo);
+                        }
+                    }
+                }
+                // Trim transactions
+                for (Sha256Hash txHash : txHashes) {
+                    account.trimTransactionIfNeeded(txHash);
+                }
+            }
+        }
     }
 }

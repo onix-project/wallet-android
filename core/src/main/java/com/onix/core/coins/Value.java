@@ -23,6 +23,7 @@ import com.google.common.math.LongMath;
 
 import java.io.Serializable;
 import java.math.BigDecimal;
+import java.math.BigInteger;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -53,9 +54,18 @@ public class Value implements Monetary, Comparable<Value>, Serializable {
         return new Value(type, units);
     }
 
+    @Nullable
+    public static Value valueOf(final ValueType type, @Nullable final Coin coin) {
+        if (coin != null) return new Value(type, coin.value);
+        return null;
+    }
 
-    public static Value valueOf(final ValueType type, final Coin coin) {
-        return new Value(type, coin.value);
+    public static Value valueOf(final ValueType type, BigInteger units) {
+        return new Value(type, units.longValue());
+    }
+
+    public static Value valueOf(final ValueType type, String unitsStr) {
+        return valueOf(type, new BigInteger(unitsStr));
     }
 
     @Override
@@ -118,13 +128,25 @@ public class Value implements Monetary, Comparable<Value>, Serializable {
         return new Value(this.type, LongMath.checkedAdd(this.value, value.value));
     }
 
+    public Value add(final long value) {
+        return new Value(this.type, LongMath.checkedAdd(this.value, value));
+    }
+
     public Value subtract(final Value value) {
         checkArgument(type.equals(value.type), "Cannot subtract a different type");
         return new Value(this.type, LongMath.checkedSubtract(this.value, value.value));
     }
 
+    public Value subtract(final Coin value) {
+        return new Value(this.type, LongMath.checkedSubtract(this.value, value.value));
+    }
+
     public Value subtract(String str) {
         return subtract(type.value(str));
+    }
+
+    public Value subtract(long value) {
+        return new Value(this.type, LongMath.checkedSubtract(this.value, value));
     }
 
     public Value multiply(final long factor) {
@@ -228,6 +250,13 @@ public class Value implements Monetary, Comparable<Value>, Serializable {
         return toPlainString() + type.getSymbol();
     }
 
+    /**
+     * Returns the value expressed as string
+     */
+    public String toUnitsString() {
+        return BigInteger.valueOf(value).toString();
+    }
+
     @Override
     public boolean equals(final Object o) {
         if (o == this)
@@ -254,7 +283,7 @@ public class Value implements Monetary, Comparable<Value>, Serializable {
     }
 
     public boolean isDust() {
-        return compareTo(type.minNonDust()) < 0;
+        return compareTo(type.getMinNonDust()) < 0;
     }
 
     public boolean isOfType(ValueType otherType) {

@@ -2,11 +2,11 @@ package com.onix.wallet;
 
 import android.text.format.DateUtils;
 
-import com.onix.core.coins.NewCoinMain;
 import com.onix.core.coins.BitcoinMain;
 import com.onix.core.coins.CoinID;
 import com.onix.core.coins.CoinType;
 import com.onix.core.coins.LitecoinMain;
+import com.onix.core.coins.OnixcoinMain;
 import com.onix.core.network.CoinAddress;
 import com.onix.stratumj.ServerAddress;
 import com.google.common.collect.ImmutableList;
@@ -40,14 +40,17 @@ public class Constants {
     public static final String ARG_ACCOUNT_ID = "account_id";
     public static final String ARG_MULTIPLE_COIN_IDS = "multiple_coin_ids";
     public static final String ARG_MULTIPLE_CHOICE = "multiple_choice";
+    public static final String ARG_SEND_REQUEST = "send_request";
     public static final String ARG_TRANSACTION_ID = "transaction_id";
     public static final String ARG_ERROR = "error";
     public static final String ARG_MESSAGE = "message";
     public static final String ARG_ADDRESS = "address";
     public static final String ARG_ADDRESS_STRING = "address_string";
     public static final String ARG_EXCHANGE_ENTRY = "exchange_entry";
-    public static final String ARG_TEST_WALLET = "test_wallet";
     public static final String ARG_URI = "test_wallet";
+    public static final String ARG_PRIVATE_KEY = "private_key";
+
+    public static final int PERMISSIONS_REQUEST_CAMERA = 0;
 
     public static final String WALLET_FILENAME_PROTOBUF = "wallet";
     public static final long WALLET_WRITE_DELAY = 5;
@@ -55,9 +58,12 @@ public class Constants {
 
     public static final long STOP_SERVICE_AFTER_IDLE_SECS = 30 * 60; // 30 mins
 
-    public static final String HTTP_CACHE_DIR = "http_cache";
+    public static final String HTTP_CACHE_NAME = "http_cache";
     public static final int HTTP_CACHE_SIZE = 256 * 1024; // 256 KiB
-    public static final int HTTP_TIMEOUT_MS = 15 * (int) DateUtils.SECOND_IN_MILLIS;
+    public static final int NETWORK_TIMEOUT_MS = 15 * (int) DateUtils.SECOND_IN_MILLIS;
+
+    public static final String TX_CACHE_NAME = "tx_cache";
+    public static final int TX_CACHE_SIZE = 5 * 1024 * 1024; // 5 MiB, TODO currently not enforced
 
     public static final long RATE_UPDATE_FREQ_MS = 30 * DateUtils.SECOND_IN_MILLIS;
 
@@ -75,42 +81,48 @@ public class Constants {
     public static final char CURRENCY_MINUS_SIGN = '-';
 
     public static final String MARKET_APP_URL = "market://details?id=%s";
-    public static final String BINARY_URL = "https://github.com/Coinomi/Coinomi-android/releases";
+    public static final String BINARY_URL = "https://github.com/onix-project/wallet-android";
 
-    public static final String VERSION_URL = "http://127.0.0.1";
+    public static final String VERSION_URL = "https://joseluisestevez.com/version-multiwallet";
+    public static final String SUPPORT_EMAIL = "support@onixcoin.com";
 
     // TODO move to resource files
     public static final List<CoinAddress> DEFAULT_COINS_SERVERS = ImmutableList.of(
-	        new CoinAddress(NewCoinMain.get(),      new ServerAddress("159.203.80.31", 23000),
-                                                    new ServerAddress("159.203.80.31", 23001)),
+            new CoinAddress(OnixcoinMain.get(),
+                    new ServerAddress("159.203.80.31", 23000),
+                    new ServerAddress("159.203.80.31", 23001),
+                    new ServerAddress("190.202.15.194", 23000), // TODO Cambiar por el nuevo oficial de ONIX
+                    new ServerAddress("190.202.15.194", 23001), // TODO Cambiar por el nuevo oficial de ONIX
+                    new ServerAddress("node.onixcoin.info", 50001), // onixcoin.info
+                    new ServerAddress("node.onixcoin.info", 50002)  // onixcoin.info
+            ),
             new CoinAddress(BitcoinMain.get(),      new ServerAddress("btc-cce-1.Coinomi.net", 5001),
-                                                    new ServerAddress("btc-cce-2.Coinomi.net", 5001)),
+                    new ServerAddress("btc-cce-2.Coinomi.net", 5001)),
             new CoinAddress(LitecoinMain.get(),     new ServerAddress("ltc-cce-1.Coinomi.net", 5002),
-                                                    new ServerAddress("ltc-cce-2.Coinomi.net", 5002))
+                    new ServerAddress("ltc-cce-2.Coinomi.net", 5002))
     );
 
     public static final HashMap<CoinType, Integer> COINS_ICONS;
     public static final HashMap<CoinType, String> COINS_BLOCK_EXPLORERS;
     static {
         COINS_ICONS = new HashMap<>();
-		COINS_ICONS.put(CoinID.NEWCOIN_MAIN.getCoinType(), R.drawable.newcoin);
+        COINS_ICONS.put(CoinID.ONIXCOIN_MAIN.getCoinType(), R.drawable.onixcoin);
         COINS_ICONS.put(CoinID.BITCOIN_MAIN.getCoinType(), R.drawable.bitcoin);
         COINS_ICONS.put(CoinID.LITECOIN_MAIN.getCoinType(), R.drawable.litecoin);
 
         COINS_BLOCK_EXPLORERS = new HashMap<CoinType, String>();
         COINS_BLOCK_EXPLORERS.put(CoinID.BITCOIN_MAIN.getCoinType(), "https://blockchain.info/tx/%s");
         COINS_BLOCK_EXPLORERS.put(CoinID.LITECOIN_MAIN.getCoinType(), "http://ltc.blockr.io/tx/info/%s");
-        //COINS_BLOCK_EXPLORERS.put(CoinID.NEWCOIN_MAIN.getCoinType(), "https://127.0.0.1");
+        COINS_BLOCK_EXPLORERS.put(CoinID.ONIXCOIN_MAIN.getCoinType(), "https://explorer.onixcoin.com/tx/%s");
     }
 
     public static final CoinType DEFAULT_COIN = BitcoinMain.get();
     public static final List<CoinType> DEFAULT_COINS = ImmutableList.of((CoinType) BitcoinMain.get());
     public static final ArrayList<String> DEFAULT_TEST_COIN_IDS = Lists.newArrayList(
-
     );
 
     public static final List<CoinType> SUPPORTED_COINS = ImmutableList.of(
-			NewCoinMain.get(),
+            OnixcoinMain.get(),
             BitcoinMain.get(),
             LitecoinMain.get()
     );

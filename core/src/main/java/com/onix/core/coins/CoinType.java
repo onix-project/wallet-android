@@ -1,12 +1,12 @@
 package com.onix.core.coins;
 
 
+import com.onix.core.exceptions.AddressMalformedException;
 import com.onix.core.messages.MessageFactory;
 import com.onix.core.util.MonetaryFormat;
+import com.onix.core.wallet.AbstractAddress;
 import com.google.common.base.Charsets;
 
-import org.bitcoinj.core.Address;
-import org.bitcoinj.core.AddressFormatException;
 import org.bitcoinj.core.Coin;
 import org.bitcoinj.core.NetworkParameters;
 import org.bitcoinj.crypto.ChildNumber;
@@ -15,7 +15,6 @@ import org.bitcoinj.crypto.HDUtils;
 import java.io.Serializable;
 import java.math.BigInteger;
 import java.util.List;
-
 
 import javax.annotation.Nullable;
 
@@ -34,7 +33,8 @@ abstract public class CoinType extends NetworkParameters implements ValueType, S
     protected String uriScheme;
     protected Integer bip44Index;
     protected Integer unitExponent;
-    protected Value feePerKb;
+    protected String addressPrefix;
+    protected Value feeValue;
     protected Value minNonDust;
     protected Value softDustLimit;
     protected SoftDustPolicy softDustPolicy;
@@ -44,6 +44,8 @@ abstract public class CoinType extends NetworkParameters implements ValueType, S
     private transient MonetaryFormat friendlyFormat;
     private transient MonetaryFormat plainFormat;
     private transient Value oneCoin;
+
+    private static FeeProvider feeProvider = null;
 
     @Override
     public String getName() {
@@ -72,31 +74,24 @@ abstract public class CoinType extends NetworkParameters implements ValueType, S
         return checkNotNull(unitExponent, "A coin failed to set a unit exponent");
     }
 
-    @Deprecated
-    public Coin getFeePerKb() {
-        return feePerKb().toCoin();
+    public Value getFeeValue() {
+        if (feeProvider != null) {
+            return feeProvider.getFeeValue(this);
+        } else {
+            return getDefaultFeeValue();
+        }
     }
 
-    public Value feePerKb() {
-        return checkNotNull(feePerKb, "A coin failed to set a fee per kilobyte");
-    }
-
-    @Deprecated
-    public Coin getMinNonDust() {
-        return minNonDust().toCoin();
+    public Value getDefaultFeeValue() {
+        return checkNotNull(feeValue, "A coin failed to set a fee value");
     }
 
     @Override
-    public Value minNonDust() {
+    public Value getMinNonDust() {
         return checkNotNull(minNonDust, "A coin failed to set a minimum amount to be considered not dust");
     }
 
-    @Deprecated
-    public Coin getSoftDustLimit() {
-        return softDustLimit().toCoin();
-    }
-
-    public Value softDustLimit() {
+    public Value getSoftDustLimit() {
         return checkNotNull(softDustLimit, "A coin failed to set a soft dust limit");
     }
 
@@ -134,9 +129,14 @@ abstract public class CoinType extends NetworkParameters implements ValueType, S
         return HDUtils.parsePath(path);
     }
 
-    public Address address(String addressStr) throws AddressFormatException {
-        return new Address(this, addressStr);
+    /**
+        Return an address prefix like NXT- or BURST-, otherwise and empty string
+     */
+    public String getAddressPrefix() {
+        return checkNotNull(addressPrefix, "A coin failed to set the address prefix");
     }
+
+    public abstract AbstractAddress newAddress(String addressStr) throws AddressMalformedException;
 
     /**
      * Returns a 1 coin of this type with the correct amount of units (satoshis)
@@ -220,5 +220,13 @@ abstract public class CoinType extends NetworkParameters implements ValueType, S
     @Override
     public boolean equals(ValueType obj) {
         return super.equals(obj);
+    }
+
+    public static void setFeeProvider(FeeProvider feeProvider) {
+        CoinType.feeProvider = feeProvider;
+    }
+
+    public interface FeeProvider {
+        Value getFeeValue(CoinType type);
     }
 }

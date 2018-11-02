@@ -1,9 +1,18 @@
 package com.onix.core.wallet;
 
+import com.onix.core.CoreUtils;
 import com.onix.core.coins.CoinType;
+import com.onix.core.coins.Value;
+import com.onix.core.coins.families.BitFamily;
+import com.onix.core.coins.families.NxtFamily;
+import com.onix.core.exceptions.UnsupportedCoinTypeException;
 import com.onix.core.protos.Protos;
-import com.onix.core.wallet.exceptions.NoSuchPocketException;
-import org.bitcoinj.core.Address;
+import com.onix.core.wallet.families.nxt.NxtFamilyWallet;
+import com.google.common.annotations.VisibleForTesting;
+import com.google.common.base.Splitter;
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Lists;
+
 import org.bitcoinj.crypto.DeterministicHierarchy;
 import org.bitcoinj.crypto.DeterministicKey;
 import org.bitcoinj.crypto.HDKeyDerivation;
@@ -13,14 +22,10 @@ import org.bitcoinj.crypto.MnemonicException;
 import org.bitcoinj.store.UnreadableWalletException;
 import org.bitcoinj.utils.Threading;
 import org.bitcoinj.wallet.DeterministicSeed;
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Splitter;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Lists;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.spongycastle.crypto.params.KeyParameter;
+import org.spongycastle.util.encoders.Hex;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -39,6 +44,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.GuardedBy;
 
+import static com.onix.core.CoreUtils.bytesToMnemonic;
 import static com.google.common.base.Preconditions.checkNotNull;
 import static com.google.common.base.Preconditions.checkState;
 
@@ -62,7 +68,11 @@ final public class Wallet {
     // FIXME, make multi account capable
     private final static int ACCOUNT_ZERO = 0;
 
-    private int version;
+    private int version = 2;
+
+    public Wallet(String mnemonic) throws MnemonicException {
+        this(CoreUtils.parseMnemonic(mnemonic), null);
+    }
 
     public Wallet(List<String> mnemonic) throws MnemonicException {
         this(mnemonic, null);
@@ -96,14 +106,7 @@ final public class Wallet {
         SecureRandom sr = new SecureRandom();
         sr.nextBytes(entropy);
 
-        List<String> mnemonic;
-        try {
-            mnemonic = MnemonicCode.INSTANCE.toMnemonic(entropy);
-        } catch (MnemonicException.MnemonicLengthException e) {
-            throw new RuntimeException(e); // should not happen, we have 16bytes of entropy
-        }
-
-        return mnemonic;
+        return bytesToMnemonic(entropy);
     }
 
     public static String generateMnemonicString(int entropyBitsSize) {
@@ -114,10 +117,21 @@ final public class Wallet {
     public static String mnemonicToString(List<String> mnemonicWords) {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < mnemonicWords.size(); i++) {
+            if (i != 0) sb.append(' ');
             sb.append(mnemonicWords.get(i));
-            sb.append(' ');
         }
         return sb.toString();
+    }
+
+    static String generateRandomId() {
+        byte[] randomIdBytes = new byte[32];
+        SecureRandom sr = new SecureRandom();
+        sr.nextBytes(randomIdBytes);
+        return Hex.toHexString(randomIdBytes);
+    }
+
+    public WalletAccount createAccount(CoinType coin, @Nullable KeyParameter key) {
+        return createAccount(coin, false, key);
     }
 
     public WalletAccount createAccount(CoinType coin, boolean generateAllKeys,
@@ -132,7 +146,7 @@ final public class Wallet {
             ImmutableList.Builder<WalletAccount> newAccounts = ImmutableList.builder();
             for (CoinType coin : coins) {
                 log.info("Creating coin pocket for {}", coin);
-                WalletPocketHD newAccount = createAndAddAccount(coin, key);
+                WalletAccount newAccount = createAndAddAccount(coin, key);
                 if (generateAllKeys) {
                     newAccount.maybeInitializeAllKeys();
                 }
@@ -211,11 +225,11 @@ final public class Wallet {
     /**
      * Get accounts that watch a specific address. Returns empty list if no account exists
      */
-    public List<WalletAccount> getAccounts(final Address address) {
+    public List<WalletAccount> getAccounts(final AbstractAddress address) {
         lock.lock();
         try {
             ImmutableList.Builder<WalletAccount> builder = ImmutableList.builder();
-            CoinType type = (CoinType) address.getParameters();
+            CoinType type = address.getType();
             if (isAccountExists(type)) {
                 for (WalletAccount account : accountsByType.get(type)) {
                     if (account.isAddressMine(address)) {
@@ -251,14 +265,14 @@ final public class Wallet {
     /**
      * Generate and add a new BIP44 account for a specific coin type
      */
-    private WalletPocketHD createAndAddAccount(CoinType coinType, @Nullable KeyParameter key) {
+    private WalletAccount createAndAddAccount(CoinType coinType, @Nullable KeyParameter key) {
         checkState(lock.isHeldByCurrentThread(), "Lock is held by another thread");
         checkNotNull(coinType, "Attempting to create a pocket for a null coin");
 
         // TODO, currently we support a single account so return the existing account
         List<WalletAccount> currentAccount = getAccounts(coinType);
         if (currentAccount.size() > 0) {
-            return (WalletPocketHD) currentAccount.get(0);
+            return currentAccount.get(0);
         }
         // TODO ///////////////
 
@@ -270,7 +284,17 @@ final public class Wallet {
         }
         int newIndex = getLastAccountIndex(coinType) + 1;
         DeterministicKey rootKey = hierarchy.get(coinType.getBip44Path(newIndex), false, true);
-        WalletPocketHD newPocket = new WalletPocketHD(rootKey, coinType, getKeyCrypter(), key);
+
+        WalletAccount newPocket;
+
+        if (coinType instanceof BitFamily) {
+            newPocket = new WalletPocketHD(rootKey, coinType, getKeyCrypter(), key);
+        } else if (coinType instanceof NxtFamily) {
+            newPocket = new NxtFamilyWallet(rootKey, coinType, getKeyCrypter(), key);
+        } else {
+            throw new UnsupportedCoinTypeException(coinType);
+        }
+
         if (isEncrypted() && !newPocket.isEncrypted()) {
             newPocket.encrypt(getKeyCrypter(), key);
         }
@@ -316,6 +340,33 @@ final public class Wallet {
         }
     }
 
+    public WalletAccount deleteAccount(String id) {
+        lock.lock();
+        try {
+            if (!accounts.containsKey(id)) {
+                return null;
+            }
+
+            WalletAccount deletedAccount = accounts.remove(id);
+            CoinType type = deletedAccount.getCoinType();
+            ArrayList<WalletAccount> sameTypeAccounts = accountsByType.get(type);
+            if (sameTypeAccounts != null) {
+                if (!sameTypeAccounts.remove(deletedAccount)) {
+                    log.warn("Could not find account in accounts by type index");
+                }
+                if (sameTypeAccounts.size() == 0) {
+                    accountsByType.remove(type);
+                }
+            }
+            deletedAccount.setWallet(null);
+            deletedAccount.disconnect();
+            saveNow();
+            return deletedAccount;
+        } finally {
+            lock.unlock();
+        }
+    }
+
     /**
      * Make the wallet generate all the needed lookahead keys if needed
      */
@@ -324,7 +375,7 @@ final public class Wallet {
         try {
             for (WalletAccount account : accounts.values()) {
                 if (account instanceof WalletPocketHD) {
-                    ((WalletPocketHD)account).maybeInitializeAllKeys();
+                    account.maybeInitializeAllKeys();
                 }
             }
         } finally {
@@ -365,17 +416,6 @@ final public class Wallet {
         }
     }
 
-//    //TODO
-//    @Deprecated
-//    public List<CoinType> getCoinTypes() {
-//        lock.lock();
-//        try {
-//            return ImmutableList.copyOf(accountsByType.keySet());
-//        } finally {
-//            lock.unlock();
-//        }
-//    }
-
     /** Returns the {@link KeyCrypter} in use or null if the key chain is not encrypted. */
     @Nullable
     public KeyCrypter getKeyCrypter() {
@@ -385,42 +425,6 @@ final public class Wallet {
         } finally {
             lock.unlock();
         }
-    }
-
-//    public SendRequest sendCoinsOffline(Address address, Coin amount)
-//            throws InsufficientMoneyException, NoSuchPocketException {
-//        return sendCoinsOffline(address, amount, null);
-//    }
-//
-//    public SendRequest sendCoinsOffline(Address address, Coin amount, @Nullable String password)
-//            throws InsufficientMoneyException, NoSuchPocketException {
-//        CoinType type = (CoinType) address.getParameters();
-//        WalletPocketHD pocket = getPocket(type);
-//        SendRequest request = null;
-//        if (pocket != null) {
-//            request = pocket.sendCoinsOffline(address, amount, password);
-//        } else {
-//            throwNoSuchPocket(type);
-//        }
-//        return request;
-//    }
-//
-//    public void completeAndSignTx(SendRequest request) throws InsufficientMoneyException, NoSuchPocketException {
-//        WalletPocketHD pocket = getPocket(request.type);
-//        if (pocket != null) {
-//            if (request.completed) {
-//                pocket.signTransaction(request);
-//            } else {
-//                pocket.completeTx(request);
-//            }
-//        } else {
-//            throwNoSuchPocket(request.type);
-//        }
-//    }
-
-    private void throwNoSuchPocket(CoinType type) throws NoSuchPocketException {
-        throw new NoSuchPocketException("Tried to send from pocket " + type.getName() +
-                " but no such pocket in wallet.");
     }
 
     public void setVersion(int version) {
@@ -697,6 +701,28 @@ final public class Wallet {
         } catch (UnsupportedEncodingException e) {
             throw new UnreadableWalletException(e.toString());
         }
+    }
+
+    public List<Value> getBalances() {
+        ImmutableList.Builder<Value> builder = ImmutableList.builder();
+        lock.lock();
+        try {
+            for (WalletAccount account : accounts.values()) {
+                builder.add(account.getBalance());
+            }
+            return builder.build();
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public boolean isLoading() {
+        for (WalletAccount account : accounts.values()) {
+            if (account.isLoading()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // TODO

@@ -1,8 +1,9 @@
 package com.onix.wallet.ui;
 
 import android.support.v4.app.Fragment;
+import android.support.v4.app.FragmentManager;
 import android.support.v4.app.FragmentTransaction;
-import android.support.v7.app.ActionBarActivity;
+import android.support.v7.app.AppCompatActivity;
 
 import com.onix.core.coins.CoinType;
 import com.onix.core.wallet.Wallet;
@@ -17,7 +18,7 @@ import javax.annotation.Nullable;
 /**
  * @author John L. Jegutanis
  */
-abstract public class BaseWalletActivity extends ActionBarActivity {
+abstract public class BaseWalletActivity extends AppCompatActivity {
 
     public WalletApplication getWalletApplication() {
         return (WalletApplication) getApplication();
@@ -48,13 +49,21 @@ abstract public class BaseWalletActivity extends ActionBarActivity {
         return getWalletApplication().getConfiguration();
     }
 
-    public void replaceFragment(Fragment fragment, int container) {
-        FragmentTransaction transaction = getSupportFragmentManager().beginTransaction();
+    public FragmentManager getFM() {
+        return getSupportFragmentManager();
+    }
 
-        transaction.setTransition(FragmentTransaction.TRANSIT_FRAGMENT_FADE);
+    public void replaceFragment(Fragment fragment, int container) {
+        replaceFragment(fragment, container, null);
+    }
+
+    public void replaceFragment(Fragment fragment, int container, @Nullable String tag) {
+        FragmentTransaction transaction = getFM().beginTransaction();
+
+        transaction.setTransition(FragmentTransaction.TRANSIT_FRAGMENT_OPEN);
         // Replace whatever is in the fragment_container view with this fragment,
         // and add the transaction to the back stack so the user can navigate back
-        transaction.replace(container, fragment);
+        transaction.replace(container, fragment, tag);
         transaction.addToBackStack(null);
 
         // Commit the transaction

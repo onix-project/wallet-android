@@ -5,7 +5,7 @@ import com.onix.core.coins.families.BitFamily;
 /**
  * @author John L. Jegutanis
  */
-public class BitcoinMain extends CoinType {
+public class BitcoinMain extends BitFamily {
     private BitcoinMain() {
         id = "bitcoin.main";
 
@@ -15,13 +15,12 @@ public class BitcoinMain extends CoinType {
         spendableCoinbaseDepth = 100;
         dumpedPrivateKeyHeader = 128;
 
-        family = BitFamily.get();
         name = "Bitcoin";
         symbol = "BTC";
         uriScheme = "bitcoin";
         bip44Index = 0;
         unitExponent = 8;
-        feePerKb = value(300000);
+        feeValue = value(12000);
         minNonDust = value(5460);
         softDustLimit = value(1000000); // 0.01 BTC
         softDustPolicy = SoftDustPolicy.AT_LEAST_BASE_FEE_IF_SOFT_DUST_TXO_PRESENT;
@@ -29,7 +28,7 @@ public class BitcoinMain extends CoinType {
     }
 
     private static BitcoinMain instance = new BitcoinMain();
-    public static synchronized BitcoinMain get() {
+    public static synchronized CoinType get() {
         return instance;
     }
 }

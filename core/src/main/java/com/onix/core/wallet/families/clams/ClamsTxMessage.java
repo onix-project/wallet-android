@@ -2,9 +2,13 @@ package com.onix.core.wallet.families.clams;
 
 import com.onix.core.messages.MessageFactory;
 import com.onix.core.messages.TxMessage;
+import com.onix.core.wallet.AbstractTransaction;
+import com.onix.core.wallet.families.bitcoin.BitTransaction;
 import com.google.common.base.Charsets;
 
 import org.bitcoinj.core.Transaction;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
@@ -14,6 +18,8 @@ import static com.onix.core.Preconditions.checkArgument;
  * @author John L. Jegutanis
  */
 public class ClamsTxMessage implements TxMessage {
+    private static final Logger log = LoggerFactory.getLogger(ClamsTxMessage.class);
+
     public static final int MAX_MESSAGE_BYTES = 140;
 
     private String message;
@@ -41,12 +47,18 @@ public class ClamsTxMessage implements TxMessage {
     }
 
     @Nullable
-    public static ClamsTxMessage parse(Transaction tx) {
-        byte[] bytes = tx.getExtraBytes();
-        if (bytes == null || bytes.length == 0) return null;
-        checkArgument(bytes.length <= MAX_MESSAGE_BYTES, "Maximum data size exceeded");
+    public static ClamsTxMessage parse(AbstractTransaction  tx) {
+        try {
+            Transaction rawTx = ((BitTransaction) tx).getRawTransaction();
+            byte[] bytes = rawTx.getExtraBytes();
+            if (bytes == null || bytes.length == 0) return null;
+            checkArgument(bytes.length <= MAX_MESSAGE_BYTES, "Maximum data size exceeded");
 
-        return new ClamsTxMessage(new String(bytes, Charsets.UTF_8));
+            return new ClamsTxMessage(new String(bytes, Charsets.UTF_8));
+        } catch (Exception e) {
+            log.info("Could not parse message: {}", e.getMessage());
+            return null;
+        }
     }
 
     public boolean isEmpty() {
@@ -68,8 +80,11 @@ public class ClamsTxMessage implements TxMessage {
     }
 
     @Override
-    public void serializeTo(Transaction transaction) {
-        transaction.setExtraBytes(serialize(message));
+    public void serializeTo(AbstractTransaction transaction) {
+        if (transaction instanceof BitTransaction) {
+            Transaction rawTx = ((BitTransaction) transaction).getRawTransaction();
+            rawTx.setExtraBytes(serialize(message));
+        }
     }
 
     static byte[] serialize(String message) {
@@ -97,9 +112,9 @@ public class ClamsTxMessage implements TxMessage {
             return create(message);
         }
 
-        @Override
         @Nullable
-        public TxMessage extractPublicMessage(Transaction transaction) {
+        @Override
+        public TxMessage extractPublicMessage(AbstractTransaction transaction) {
             return parse(transaction);
         }
     }

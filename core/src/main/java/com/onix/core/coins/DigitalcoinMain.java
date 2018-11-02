@@ -5,7 +5,7 @@ import com.onix.core.coins.families.BitFamily;
 /**
  * @author FuzzyHobbit
  */
-public class DigitalcoinMain extends CoinType {
+public class DigitalcoinMain extends BitFamily {
     private DigitalcoinMain() {
         id = "digitalcoin.main";
 
@@ -13,14 +13,14 @@ public class DigitalcoinMain extends CoinType {
         p2shHeader = 5;
         acceptableAddressCodes = new int[] { addressHeader, p2shHeader };
         spendableCoinbaseDepth = 5;
+        dumpedPrivateKeyHeader = 158;
 
-        family = BitFamily.get();
         name = "Digitalcoin";
         symbol = "DGC";
         uriScheme = "digitalcoin";
         bip44Index = 18;
         unitExponent = 8;
-        feePerKb = value(5000000); // 0.05 DGC
+        feeValue = value(5000000); // 0.05 DGC
         feePolicy = FeePolicy.FLAT_FEE;
         minNonDust = value(10920);
         softDustLimit = minNonDust;
@@ -29,7 +29,7 @@ public class DigitalcoinMain extends CoinType {
     }
 
     private static DigitalcoinMain instance = new DigitalcoinMain();
-    public static synchronized DigitalcoinMain get() {
+    public static synchronized CoinType get() {
         return instance;
     }
 }

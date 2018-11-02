@@ -7,15 +7,14 @@ import android.view.ViewGroup;
 import android.widget.BaseAdapter;
 
 import com.onix.core.coins.CoinType;
+import com.onix.core.coins.Value;
+import com.onix.core.coins.families.NxtFamily;
 import com.onix.core.util.GenericUtils;
+import com.onix.core.wallet.AbstractTransaction;
+import com.onix.core.wallet.AbstractTransaction.AbstractOutput;
 import com.onix.core.wallet.AbstractWallet;
-import com.onix.wallet.AddressBookProvider;
 import com.onix.wallet.R;
 import com.onix.wallet.ui.widget.SendOutput;
-
-import org.bitcoinj.core.Coin;
-import org.bitcoinj.core.Transaction;
-import org.bitcoinj.core.TransactionOutput;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -31,10 +30,9 @@ public class TransactionAmountVisualizerAdapter extends BaseAdapter {
     private boolean isSending;
     private CoinType type;
     private String symbol;
-    private List<TransactionOutput> outputs;
-    private boolean isInternalTransfer;
+    private List<AbstractTransaction.AbstractOutput> outputs;
     private boolean hasFee;
-    private Coin feeAmount;
+    private Value feeAmount;
 
     private int itemCount;
 
@@ -44,23 +42,31 @@ public class TransactionAmountVisualizerAdapter extends BaseAdapter {
         pocket = walletPocket;
         type = pocket.getCoinType();
         symbol = type.getSymbol();
-        outputs = new ArrayList<TransactionOutput>();
+        outputs = new ArrayList<>();
     }
 
-    public void setTransaction(Transaction tx) {
+    public void setTransaction(AbstractTransaction tx) {
         outputs.clear();
-        final Coin value = tx.getValue(pocket);
+        final Value value = tx.getValue(pocket);
         isSending = value.signum() < 0;
         // if sending and all the outputs point inside the current pocket it is an internal transfer
-        isInternalTransfer = isSending;
-        for (TransactionOutput txo : tx.getOutputs()) {
+        boolean isInternalTransfer = isSending;
+
+        for (AbstractOutput output : tx.getSentTo()) {
             if (isSending) {
-                if (txo.isMine(pocket)) continue;
+                // When sending hide change outputs
+                if (pocket.isAddressMine(output.getAddress())) continue;
                 isInternalTransfer = false;
             } else {
-                if (!txo.isMine(pocket)) continue;
+                if (pocket.getCoinType() instanceof NxtFamily) {
+                    // TODO review the following
+                    outputs.add(new AbstractOutput(tx.getReceivedFrom().get(0), tx.getValue(pocket)));
+                    break;
+                }
+                // When receiving hide outputs that are not ours
+                if (!pocket.isAddressMine(output.getAddress())) continue;
             }
-            outputs.add(txo);
+            outputs.add(output);
         }
 
         feeAmount = tx.getFee();
@@ -78,7 +84,7 @@ public class TransactionAmountVisualizerAdapter extends BaseAdapter {
     }
 
     @Override
-    public TransactionOutput getItem(int position) {
+    public AbstractOutput getItem(int position) {
         if (position < outputs.size()) {
             return outputs.get(position);
         }
@@ -100,7 +106,7 @@ public class TransactionAmountVisualizerAdapter extends BaseAdapter {
         }
 
         final SendOutput output = (SendOutput) row;
-        final TransactionOutput txo = getItem(position);
+        final AbstractOutput txo = getItem(position);
 
         if (txo == null) {
             if (position == 0) {
@@ -118,12 +124,10 @@ public class TransactionAmountVisualizerAdapter extends BaseAdapter {
                 output.setSymbol(null);
             }
         } else {
-            Coin outputAmount = txo.getValue();
+            Value outputAmount = txo.getValue();
             output.setAmount(GenericUtils.formatCoinValue(type, outputAmount));
             output.setSymbol(symbol);
-            String address = txo.getScriptPubKey().getToAddress(type).toString();
-            output.setLabelAndAddress(
-                    AddressBookProvider.resolveLabel(context, type, address), address);
+            output.setLabelAndAddress(txo.getAddress());
             output.setSending(isSending);
         }
 

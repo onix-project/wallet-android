@@ -2,21 +2,21 @@ package com.onix.wallet.ui;
 
 import android.os.Bundle;
 import android.support.v4.app.Fragment;
-import android.support.v4.app.FragmentTransaction;
+import android.support.v7.app.ActionBar;
+import android.view.Menu;
 import android.view.MenuItem;
 
 import com.onix.wallet.R;
 
+/**
+ * Activity that displays a list of previously used addresses.
+ * @author John L. Jegutanis
+ */
 public class PreviousAddressesActivity extends BaseWalletActivity implements
         PreviousAddressesFragment.Listener {
 
-
-    private static final int LIST_ADDRESSES = 0;
-    private static final int VIEW_ADDRESS = 1;
-
-    private int currentFragment;
-
-    private PreviousAddressesFragment addressesList;
+    private static final String LIST_ADDRESSES_TAG = "list_addresses_tag";
+    private static final String ADDRESS_TAG = "address_tag";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -24,31 +24,30 @@ public class PreviousAddressesActivity extends BaseWalletActivity implements
         setContentView(R.layout.activity_fragment_wrapper);
 
         if (savedInstanceState == null) {
-            addressesList = new PreviousAddressesFragment();
+            PreviousAddressesFragment addressesList = new PreviousAddressesFragment();
             addressesList.setArguments(getIntent().getExtras());
             getSupportFragmentManager().beginTransaction()
-                    .add(R.id.container, addressesList)
+                    .add(R.id.container, addressesList, LIST_ADDRESSES_TAG)
                     .commit();
         }
 
-        getSupportActionBar().setDisplayHomeAsUpEnabled(true);
-        getSupportActionBar().setDisplayShowHomeEnabled(false);
-
-        currentFragment = LIST_ADDRESSES;
+        ActionBar actionBar = getSupportActionBar();
+        if (actionBar != null) {
+            actionBar.setDisplayHomeAsUpEnabled(true);
+            actionBar.setDisplayShowHomeEnabled(false);
+        }
     }
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
         switch (item.getItemId()) {
             case android.R.id.home:
-                switch (currentFragment) {
-                    case LIST_ADDRESSES:
-                        finish();
-                        return true;
-                    case VIEW_ADDRESS:
-                        getSupportFragmentManager().popBackStack();
-                        currentFragment = LIST_ADDRESSES;
-                        return true;
+                if (getFM().findFragmentByTag(LIST_ADDRESSES_TAG).isVisible()) {
+                    finish();
+                    return true;
+                } else {
+                    getSupportFragmentManager().popBackStack();
+                    return true;
                 }
             default:
                 // Not one of ours. Perform default menu processing
@@ -56,21 +55,18 @@ public class PreviousAddressesActivity extends BaseWalletActivity implements
         }
     }
 
-    private void replaceFragment(Fragment fragment) {
-        FragmentTransaction transaction = getSupportFragmentManager().beginTransaction();
-
-        // Replace whatever is in the fragment_container view with this fragment,
-        // and add the transaction to the back stack so the user can navigate back
-        transaction.replace(R.id.container, fragment);
-        transaction.addToBackStack(null);
-
-        // Commit the transaction
-        transaction.commit();
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        Fragment f = getFM().findFragmentByTag(ADDRESS_TAG);
+        if (f != null && f.isVisible()) {
+            getMenuInflater().inflate(R.menu.request_single_address, menu);
+            return true;
+        }
+        return super.onCreateOptionsMenu(menu);
     }
 
     @Override
     public void onAddressSelected(Bundle args) {
-        currentFragment = VIEW_ADDRESS;
-        replaceFragment(AddressRequestFragment.newInstance(args));
+        replaceFragment(AddressRequestFragment.newInstance(args), R.id.container, ADDRESS_TAG);
     }
 }

@@ -5,7 +5,7 @@ import com.onix.core.coins.families.BitFamily;
 /**
  * @author John L. Jegutanis
  */
-public class NamecoinMain extends CoinType {
+public class NamecoinMain extends BitFamily {
     private NamecoinMain() {
         id = "namecoin.main";
 
@@ -13,14 +13,14 @@ public class NamecoinMain extends CoinType {
         // Namecoin does not have p2sh addresses
         acceptableAddressCodes = new int[] { addressHeader};
         spendableCoinbaseDepth = 100;
+        dumpedPrivateKeyHeader = 128;
 
-        family = BitFamily.get();
         name = "Namecoin";
         symbol = "NMC";
         uriScheme = "namecoin";
         bip44Index = 7;
         unitExponent = 8;
-        feePerKb = value(500000);
+        feeValue = value(500000);
         minNonDust = value(10000); // 0.0001 NMC mininput
         softDustLimit = value(1000000); // 0.01 NMC
         softDustPolicy = SoftDustPolicy.BASE_FEE_FOR_EACH_SOFT_DUST_TXO;
@@ -28,7 +28,7 @@ public class NamecoinMain extends CoinType {
     }
 
     private static NamecoinMain instance = new NamecoinMain();
-    public static synchronized NamecoinMain get() {
+    public static synchronized CoinType get() {
         return instance;
     }
 }

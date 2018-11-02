@@ -51,35 +51,39 @@
                 android:layout_alignStart="@+id/textView" />
         </RelativeLayout>
 
+        <Button
+            android:id="@+id/terms_of_service_button"
+            style="@style/BorderlessButtonLink"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="@dimen/activity_vertical_margin"
+            android:layout_gravity="center"
+            android:text="@string/terms_of_service_title" />
+
+
         <TextView
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             style="@style/NormalText"
             android:autoLink="web"
-            android:paddingTop="14dp"
-            android:text="Onixcoin.com"
-            android:gravity="center"/>
+            android:gravity="center"
+            android:text="Es un proyecto fintech que busca a través de la tecnología blockchain, desarrollar una plataforma digital para prestamos en criptomonedas, y de esta manera cualquier persona sin historial crediticio puede acceder a un préstamo en onix." />
 
-        <LinearLayout
-            android:orientation="horizontal"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:paddingTop="16dp">
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                style="@style/NormalText"
-                android:autoLink="web"
-                android:gravity="center"
-                android:text="Es un proyecto fintech que busca a través de la tecnología blockchain, desarrollar una plataforma digital para prestamos en criptomonedas, y de esta manera cualquier persona sin historial crediticio puede acceder a un préstamo en onix." />
-        </LinearLayout>
-<!--
+        <!--<TextView-->
+            <!--android:layout_width="wrap_content"-->
+            <!--android:layout_height="wrap_content"-->
+            <!--style="@style/NormalText"-->
+            <!--android:autoLink="web"-->
+            <!--android:layout_marginTop="16dp"-->
+            <!--android:layout_gravity="center"-->
+            <!--android:text="@string/coinomi_website" />-->
+        <!--
         <LinearLayout
             android:orientation="horizontal"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
-            android:paddingTop="16dp">
+            android:paddingTop="@dimen/activity_vertical_margin">
             <TextView
                 android:id="@+id/translation_globe"
                 android:layout_width="wrap_content"
@@ -103,6 +107,14 @@
             style="@style/NormalText"
             android:autoLink="web"
             android:text="@string/about_credits_translations_credits" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            style="@style/NormalText"
+            android:autoLink="web"
+            android:paddingTop="14dp"
+            android:text="@string/about_licence" />
 
         <TextView
             android:layout_width="wrap_content"
@@ -174,7 +186,16 @@
             style="@style/NormalText"
             android:layout_gravity="center_horizontal"
             android:paddingTop="16dp"
-            android:text="@string/about_coinomi_copyright" />-->
+            android:text="@string/about_coinomi_copyright" />
 
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            style="@style/NormalText"
+            android:layout_gravity="center_horizontal"
+            android:paddingTop="16dp"
+            android:text="@string/about_araguaney_copyright" />
+
+        -->
     </LinearLayout>
 </ScrollView>

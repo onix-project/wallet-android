@@ -17,13 +17,10 @@ package com.onix.wallet.ui;
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-import javax.annotation.Nonnull;
-import javax.annotation.Nullable;
-
-import android.app.Activity;
 import android.app.Dialog;
 import android.content.ContentResolver;
 import android.content.ContentValues;
+import android.content.Context;
 import android.content.DialogInterface;
 import android.net.Uri;
 import android.os.Bundle;
@@ -36,10 +33,12 @@ import android.widget.TextView;
 import com.onix.core.coins.CoinID;
 import com.onix.core.coins.CoinType;
 import com.onix.core.util.GenericUtils;
+import com.onix.core.wallet.AbstractAddress;
 import com.onix.wallet.AddressBookProvider;
 import com.onix.wallet.R;
 
-import org.bitcoinj.core.Address;
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
 
 /**
  * @author Andreas Schildbach
@@ -52,61 +51,64 @@ public final class EditAddressBookEntryFragment extends DialogFragment {
     private static final String KEY_ADDRESS = "address";
     private static final String KEY_SUGGESTED_ADDRESS_LABEL = "suggested_address_label";
 
-    public static void edit(final FragmentManager fm, @Nonnull final Address address) {
-        edit(fm, (CoinType) address.getParameters(), address.toString(), null);
+    public static void edit(final FragmentManager fm, @Nonnull final AbstractAddress address) {
+        edit(fm, address.getType(), address, null);
     }
 
-    public static void edit(final FragmentManager fm, @Nonnull CoinType type, @Nonnull final String address) {
+    public static void edit(final FragmentManager fm, @Nonnull CoinType type,
+                            @Nonnull final AbstractAddress address) {
         edit(fm, type, address, null);
     }
 
-    public static void edit(final FragmentManager fm, @Nonnull CoinType type, @Nonnull final String address, @Nullable final String suggestedAddressLabel) {
-        final DialogFragment newFragment = EditAddressBookEntryFragment.instance(type, address, suggestedAddressLabel);
+    public static void edit(final FragmentManager fm, @Nonnull CoinType type,
+                            @Nonnull final AbstractAddress address,
+                            @Nullable final String suggestedAddressLabel) {
+        final DialogFragment newFragment =
+                EditAddressBookEntryFragment.instance(type, address, suggestedAddressLabel);
         newFragment.show(fm, FRAGMENT_TAG);
     }
 
-    private static EditAddressBookEntryFragment instance(@Nonnull CoinType type, @Nonnull final String address, @Nullable final String suggestedAddressLabel) {
+    private static EditAddressBookEntryFragment instance(@Nonnull CoinType type,
+                                                         @Nonnull final AbstractAddress address,
+                                                         @Nullable final String suggestedAddressLabel) {
         final EditAddressBookEntryFragment fragment = new EditAddressBookEntryFragment();
 
         final Bundle args = new Bundle();
         args.putString(KEY_COIN_ID, type.getId());
-        args.putString(KEY_ADDRESS, address);
+        args.putSerializable(KEY_ADDRESS, address);
         args.putString(KEY_SUGGESTED_ADDRESS_LABEL, suggestedAddressLabel);
         fragment.setArguments(args);
 
         return fragment;
     }
 
-    private Activity activity;
+    private Context context;
     private ContentResolver contentResolver;
 
     @Override
-    public void onAttach(final Activity activity) {
-        super.onAttach(activity);
-
-        this.activity = activity;
-        this.contentResolver = activity.getContentResolver();
+    public void onAttach(final Context context) {
+        super.onAttach(context);
+        this.context = context;
+        this.contentResolver = context.getContentResolver();
     }
 
     @Override
     public Dialog onCreateDialog(final Bundle savedInstanceState) {
         final Bundle args = getArguments();
         final CoinType type = CoinID.typeFromId(args.getString(KEY_COIN_ID));
-        final String address = args.getString(KEY_ADDRESS);
+        final AbstractAddress address = (AbstractAddress) args.getSerializable(KEY_ADDRESS);
         final String suggestedAddressLabel = args.getString(KEY_SUGGESTED_ADDRESS_LABEL);
 
-        final LayoutInflater inflater = LayoutInflater.from(activity);
+        final LayoutInflater inflater = LayoutInflater.from(context);
 
-        final Uri uri = AddressBookProvider.contentUri(activity.getPackageName(), type)
-                .buildUpon().appendPath(address).build();
+        final Uri uri = AddressBookProvider.contentUri(context.getPackageName(), type)
+                .buildUpon().appendPath(address.toString()).build();
 
-        final String label = AddressBookProvider.resolveLabel(activity, type, address);
+        final String label = AddressBookProvider.resolveLabel(context, address);
 
         final boolean isAdd = label == null;
 
-        final DialogBuilder dialog = new DialogBuilder(activity);
-
-        dialog.setTitle(isAdd ? R.string.edit_address_book_entry_dialog_title_add : R.string.edit_address_book_entry_dialog_title_edit);
+        final DialogBuilder dialog = new DialogBuilder(context);
 
         final View view = inflater.inflate(R.layout.edit_address_book_entry_dialog, null);
 
@@ -143,7 +145,7 @@ public final class EditAddressBookEntryFragment extends DialogFragment {
             }
         };
 
-        dialog.setPositiveButton(isAdd ? R.string.button_add : R.string.button_save, onClickListener);
+        dialog.setPositiveButton(R.string.button_save, onClickListener);
         if (!isAdd)
             dialog.setNeutralButton(R.string.button_delete, onClickListener);
         dialog.setNegativeButton(R.string.button_cancel, onClickListener);

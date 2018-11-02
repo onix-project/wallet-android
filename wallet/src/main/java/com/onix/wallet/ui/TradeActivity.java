@@ -1,12 +1,15 @@
 package com.onix.wallet.ui;
 
 import android.os.Bundle;
+import android.support.v4.app.Fragment;
 
+import com.onix.core.coins.CoinType;
 import com.onix.core.coins.Value;
 import com.onix.core.wallet.WalletAccount;
 import com.onix.wallet.Constants;
 import com.onix.wallet.ExchangeHistoryProvider.ExchangeEntry;
 import com.onix.wallet.R;
+import com.onix.wallet.ui.dialogs.ConfirmAddCoinUnlockWalletDialog;
 
 import org.bitcoinj.crypto.KeyCrypterException;
 
@@ -14,13 +17,12 @@ import javax.annotation.Nullable;
 
 
 public class TradeActivity extends BaseWalletActivity implements
-        TradeSelectFragment.Listener, MakeTransactionFragment.Listener, TradeStatusFragment.Listener {
+        TradeSelectFragment.Listener, MakeTransactionFragment.Listener, TradeStatusFragment.Listener,
+        ConfirmAddCoinUnlockWalletDialog.Listener {
+
+    private static final String TRADE_SELECT_FRAGMENT_TAG = "trade_select_fragment_tag";
 
     private int containerRes;
-
-    private enum State {
-        INPUT, PREPARATION, SENDING, SENT, FAILED
-    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -31,7 +33,7 @@ public class TradeActivity extends BaseWalletActivity implements
 
         if (savedInstanceState == null) {
             getSupportFragmentManager().beginTransaction()
-                    .add(containerRes, new TradeSelectFragment())
+                    .add(containerRes, new TradeSelectFragment(), TRADE_SELECT_FRAGMENT_TAG)
                     .commit();
         }
     }
@@ -79,5 +81,13 @@ public class TradeActivity extends BaseWalletActivity implements
     @Override
     public void onFinish() {
         finish();
+    }
+
+    @Override
+    public void addCoin(CoinType type, String description, CharSequence password) {
+        Fragment f = getFM().findFragmentByTag(TRADE_SELECT_FRAGMENT_TAG);
+        if (f != null && f.isVisible() && f instanceof TradeSelectFragment) {
+            ((TradeSelectFragment) f).maybeStartAddCoinAndProceedTask(description, password);
+        }
     }
 }

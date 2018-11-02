@@ -1,6 +1,6 @@
 package com.onix.wallet.ui;
 
-import android.app.Activity;
+import android.content.Context;
 import android.os.Bundle;
 import android.support.v4.app.Fragment;
 import android.view.LayoutInflater;
@@ -18,7 +18,7 @@ import org.slf4j.LoggerFactory;
 public class WelcomeFragment extends Fragment {
     private static final Logger log = LoggerFactory.getLogger(WelcomeFragment.class);
 
-    private Listener mListener;
+    private Listener listener;
 
     public WelcomeFragment() { }
 
@@ -34,7 +34,6 @@ public class WelcomeFragment extends Fragment {
 
         view.findViewById(R.id.create_wallet).setOnClickListener(getOnCreateListener());
         view.findViewById(R.id.restore_wallet).setOnClickListener(getOnRestoreListener());
-        view.findViewById(R.id.test_wallet).setOnClickListener(getOnTestListener());
 
         return view;
     }
@@ -44,8 +43,8 @@ public class WelcomeFragment extends Fragment {
             @Override
             public void onClick(View v) {
                 log.info("Clicked create new wallet");
-                if (mListener != null) {
-                    mListener.onCreateNewWallet();
+                if (listener != null) {
+                    listener.onCreateNewWallet();
                 }
             }
         };
@@ -56,48 +55,33 @@ public class WelcomeFragment extends Fragment {
             @Override
             public void onClick(View v) {
                 log.info("Clicked restore wallet");
-                if (mListener != null) {
-                    mListener.onRestoreWallet();
-                }
-            }
-        };
-    }
-
-    private View.OnClickListener getOnTestListener() {
-        return new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                log.info("Clicked test wallet");
-                if (mListener != null) {
-                    mListener.onTestWallet();
+                if (listener != null) {
+                    listener.onRestoreWallet();
                 }
             }
         };
     }
 
     @Override
-    public void onAttach(Activity activity) {
-        super.onAttach(activity);
+    public void onAttach(final Context context) {
+        super.onAttach(context);
         try {
-            mListener = (Listener) activity;
+            listener = (Listener) context;
         } catch (ClassCastException e) {
-            throw new ClassCastException(activity.toString()
-                    + " must implement OnFragmentInteractionListener");
+            throw new ClassCastException(context.toString() + " must implement " + Listener.class);
         }
     }
 
     @Override
     public void onDetach() {
         super.onDetach();
-        mListener = null;
+        listener = null;
     }
 
     public interface Listener {
         void onCreateNewWallet();
         void onRestoreWallet();
-        void onTestWallet();
         void onSeedCreated(String seed);
         void onSeedVerified(Bundle args);
     }
-
 }

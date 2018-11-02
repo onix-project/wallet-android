@@ -26,8 +26,8 @@ public class CheckUpdateTask extends AsyncTask<Void, Void, Integer> {
         try {
             connection = (HttpURLConnection) new URL(Constants.VERSION_URL).openConnection();
             connection.setInstanceFollowRedirects(true);
-            connection.setConnectTimeout(Constants.HTTP_TIMEOUT_MS);
-            connection.setReadTimeout(Constants.HTTP_TIMEOUT_MS);
+            connection.setConnectTimeout(Constants.NETWORK_TIMEOUT_MS);
+            connection.setReadTimeout(Constants.NETWORK_TIMEOUT_MS);
             connection.setRequestProperty("Accept-Charset", "utf-8");
             connection.connect();
 
@@ -38,7 +38,7 @@ public class CheckUpdateTask extends AsyncTask<Void, Void, Integer> {
                 return Integer.valueOf(line);
             }
         } catch (final Exception e) {
-            log.info("Could not check for update", e);
+            log.info("Could not check for update: {}", e.getMessage());
         } finally {
             if (connection != null)
                 connection.disconnect();
