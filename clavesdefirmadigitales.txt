@@ -1,4 +1,0 @@
-onixcoin2.jks{
-	alias: onixcoin
-	password: 1qaz2wsxonix
-}//esta es la firma actual en produccion googlePlay
