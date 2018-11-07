@@ -83,7 +83,7 @@ public class Constants {
     public static final String MARKET_APP_URL = "market://details?id=%s";
     public static final String BINARY_URL = "https://github.com/onix-project/wallet-android";
 
-    public static final String VERSION_URL = "https://joseluisestevez.com/version-multiwallet";
+    public static final String VERSION_URL = "https://android.onixcoin.info/version-android";
     public static final String SUPPORT_EMAIL = "support@onixcoin.com";
 
     // TODO move to resource files
