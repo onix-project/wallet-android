@@ -18,8 +18,8 @@ android {
         applicationId "com.onix.wallet"
         minSdkVersion 15
         targetSdkVersion 26
-        versionCode 85
-        versionName "v1.0.3"
+        versionCode 86
+        versionName "v1.0.4"
         // Enabling multidex support.
         multiDexEnabled true
         javaCompileOptions {
