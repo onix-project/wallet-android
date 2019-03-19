@@ -89,8 +89,8 @@ public class Constants {
     // TODO move to resource files
     public static final List<CoinAddress> DEFAULT_COINS_SERVERS = ImmutableList.of(
             new CoinAddress(OnixcoinMain.get(),
-                    new ServerAddress("159.203.80.31", 23000),
-                    new ServerAddress("159.203.80.31", 23001),
+                    new ServerAddress("electrumx.onixcoin.com", 23000),
+                    new ServerAddress("electrumx.onixcoin.com", 23001),
                     new ServerAddress("node.onixcoin.info", 50001), // onixcoin.info
                     new ServerAddress("node.onixcoin.info", 50002)  // onixcoin.info
             ),
